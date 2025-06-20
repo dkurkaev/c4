@@ -48,6 +48,13 @@ interface TreeNodeProps {
   level: number;
   onNodeSelect: (node: DDTreeNode) => void;
   onContextMenu: (e: React.MouseEvent, node: DDTreeNode) => void;
+  onDragStart: (e: React.DragEvent, node: DDTreeNode) => void;
+  onDragOver: (e: React.DragEvent, node: DDTreeNode) => void;
+  onDragLeave: (e: React.DragEvent) => void;
+  onDrop: (e: React.DragEvent, node: DDTreeNode) => void;
+  onDragEnd: () => void;
+  isDragOver: boolean;
+  isDragging: boolean;
 }
 
 // Функция для построения дерева из плоского списка групп и компонентов
@@ -104,15 +111,27 @@ function buildTree(groups: DDGroupAPI[], components: DDComponentAPI[]): DDTreeNo
   return roots;
 }
 
-function TreeNode({ node, level, onNodeSelect, onContextMenu }: TreeNodeProps) {
+function TreeNode({ node, level, onNodeSelect, onContextMenu, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd, isDragOver, isDragging }: TreeNodeProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const hasChildren = node.children && node.children.length > 0;
 
   return (
     <div className="select-none">
       <div 
-        className={`flex items-center py-2 px-3 hover:bg-gray-50 cursor-pointer rounded-md transition-colors`}
+        className={`flex items-center py-2 px-3 cursor-pointer rounded-md transition-colors ${
+          isDragging 
+            ? 'opacity-50 bg-blue-100 border-2 border-dashed border-blue-300' 
+            : isDragOver 
+              ? 'bg-green-100 border-2 border-dashed border-green-400' 
+              : 'hover:bg-gray-50'
+        }`}
         style={{ paddingLeft: `${level * 20 + 12}px` }}
+        draggable
+        onDragStart={(e) => onDragStart(e, node)}
+        onDragOver={(e) => onDragOver(e, node)}
+        onDragLeave={onDragLeave}
+        onDrop={(e) => onDrop(e, node)}
+        onDragEnd={onDragEnd}
         onClick={(e) => {
           e.stopPropagation();
           if (hasChildren) {
@@ -177,12 +196,32 @@ function TreeNode({ node, level, onNodeSelect, onContextMenu }: TreeNodeProps) {
         )}
         
         <span className="text-gray-700">{node.name}</span>
+        
+        {/* Индикатор перетаскивания */}
+        {isDragging && (
+          <svg className="w-4 h-4 ml-auto text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+          </svg>
+        )}
       </div>
       
       {hasChildren && isExpanded && (
         <div className="ml-2">
           {node.children!.map((child) => (
-            <TreeNode key={child.id} node={child} level={level + 1} onNodeSelect={onNodeSelect} onContextMenu={onContextMenu} />
+            <TreeNode 
+              key={child.id} 
+              node={child} 
+              level={level + 1} 
+              onNodeSelect={onNodeSelect} 
+              onContextMenu={onContextMenu} 
+              onDragStart={onDragStart} 
+              onDragOver={onDragOver} 
+              onDragLeave={onDragLeave} 
+              onDrop={onDrop} 
+              onDragEnd={onDragEnd} 
+              isDragOver={false} 
+              isDragging={false} 
+            />
           ))}
         </div>
       )}
@@ -217,6 +256,20 @@ export default function DDPage() {
     isEditing: boolean;
     editValues: any;
   }>({ visible: false, parentNode: null, createType: null, isEditing: false, editValues: {} });
+
+  // Состояние для drag'n'drop
+  const [dragState, setDragState] = useState<{
+    draggedNode: DDTreeNode | null;
+    dragOverNode: DDTreeNode | null;
+    isDragging: boolean;
+  }>({ draggedNode: null, dragOverNode: null, isDragging: false });
+
+  // Состояние для модального окна подтверждения перемещения
+  const [moveConfirmModal, setMoveConfirmModal] = useState<{
+    visible: boolean;
+    sourceNode: DDTreeNode | null;
+    targetNode: DDTreeNode | null;
+  }>({ visible: false, sourceNode: null, targetNode: null });
 
   const handleNodeSelect = (node: DDTreeNode) => {
     setSelectedNode(node);
@@ -692,6 +745,149 @@ export default function DDPage() {
     }
   };
 
+  // Проверка возможности перемещения элемента
+  const canMoveNode = (sourceNode: DDTreeNode, targetNode: DDTreeNode): boolean => {
+    // Нельзя перемещать элемент сам в себя
+    if (sourceNode.id === targetNode.id) return false;
+    
+    // Нельзя перемещать группу в компонент
+    if (sourceNode.type === 'group' && targetNode.type === 'component') return false;
+    
+    // Нельзя перемещать элемент в своего потомка (избегаем циклических ссылок)
+    // Проверяем только потомков sourceNode, а не предков
+    const isDescendant = (node: DDTreeNode, ancestorId: string): boolean => {
+      if (node.children) {
+        return node.children.some(child => 
+          child.id === ancestorId || isDescendant(child, ancestorId)
+        );
+      }
+      return false;
+    };
+    
+    // Запрещаем перемещение только в потомков, предков разрешаем
+    return !isDescendant(sourceNode, targetNode.id);
+  };
+
+  // Обработчики drag'n'drop
+  const handleDragStart = (e: React.DragEvent, node: DDTreeNode) => {
+    setDragState({ draggedNode: node, dragOverNode: null, isDragging: true });
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent, node: DDTreeNode) => {
+    e.preventDefault();
+    if (dragState.draggedNode && canMoveNode(dragState.draggedNode, node)) {
+      e.dataTransfer.dropEffect = 'move';
+      setDragState(prev => ({ ...prev, dragOverNode: node }));
+    } else {
+      e.dataTransfer.dropEffect = 'none';
+      setDragState(prev => ({ ...prev, dragOverNode: null }));
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragState(prev => ({ ...prev, dragOverNode: null }));
+  };
+
+  const handleDrop = (e: React.DragEvent, targetNode: DDTreeNode) => {
+    e.preventDefault();
+    
+    if (!dragState.draggedNode || !canMoveNode(dragState.draggedNode, targetNode)) {
+      setDragState({ draggedNode: null, dragOverNode: null, isDragging: false });
+      return;
+    }
+
+    // Показываем модальное окно подтверждения
+    setMoveConfirmModal({
+      visible: true,
+      sourceNode: dragState.draggedNode,
+      targetNode: targetNode
+    });
+
+    setDragState({ draggedNode: null, dragOverNode: null, isDragging: false });
+  };
+
+  const handleDragEnd = () => {
+    setDragState({ draggedNode: null, dragOverNode: null, isDragging: false });
+  };
+
+  // Обработчик подтверждения перемещения
+  const handleMoveConfirm = async () => {
+    if (!moveConfirmModal.sourceNode || !moveConfirmModal.targetNode) return;
+
+    const sourceNode = moveConfirmModal.sourceNode;
+    const targetNode = moveConfirmModal.targetNode;
+
+    try {
+      setSaving(true);
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      
+      let endpoint = '';
+      let payload: any = {};
+      
+      if (sourceNode.type === 'group') {
+        const groupId = (sourceNode.data as DDGroupAPI).id;
+        endpoint = `${apiUrl}/api/architecture/dd-groups/${groupId}`;
+        
+        // Устанавливаем новый parent_id
+        payload = {
+          ...sourceNode.data,
+          parent_id: targetNode.type === 'group' ? (targetNode.data as DDGroupAPI).id : null
+        };
+      } else {
+        const componentId = (sourceNode.data as DDComponentAPI).id;
+        endpoint = `${apiUrl}/api/architecture/dd-components/${componentId}`;
+        
+        // Устанавливаем новый group_id
+        payload = {
+          ...sourceNode.data,
+          group_id: targetNode.type === 'group' ? (targetNode.data as DDGroupAPI).id : (targetNode.data as DDComponentAPI).group_id
+        };
+      }
+
+      const response = await fetch(endpoint, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // Перезагружаем данные после перемещения
+      const fetchDDData = async () => {
+        const [groupsResponse, componentsResponse] = await Promise.all([
+          fetch(`${apiUrl}/api/architecture/dd-groups`),
+          fetch(`${apiUrl}/api/architecture/dd-components`)
+        ]);
+        
+        const [groupsData, componentsData]: [DDGroupAPI[], DDComponentAPI[]] = await Promise.all([
+          groupsResponse.json(),
+          componentsResponse.json()
+        ]);
+        
+        const treeData = buildTree(groupsData, componentsData);
+        setDdTree(treeData);
+      };
+
+      await fetchDDData();
+      setMoveConfirmModal({ visible: false, sourceNode: null, targetNode: null });
+    } catch (err) {
+      console.error('Ошибка перемещения:', err);
+      alert('Ошибка при перемещении элемента');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleMoveCancel = () => {
+    setMoveConfirmModal({ visible: false, sourceNode: null, targetNode: null });
+  };
+
   useEffect(() => {
     const fetchDDData = async () => {
       try {
@@ -794,7 +990,20 @@ export default function DDPage() {
               ) : (
                 <div className="space-y-1">
                   {ddTree.map((node) => (
-                    <TreeNode key={node.id} node={node} level={0} onNodeSelect={handleNodeSelect} onContextMenu={handleContextMenu} />
+                    <TreeNode 
+                      key={node.id} 
+                      node={node} 
+                      level={0} 
+                      onNodeSelect={handleNodeSelect} 
+                      onContextMenu={handleContextMenu} 
+                      onDragStart={handleDragStart} 
+                      onDragOver={handleDragOver} 
+                      onDragLeave={handleDragLeave} 
+                      onDrop={handleDrop} 
+                      onDragEnd={handleDragEnd} 
+                      isDragOver={dragState.dragOverNode?.id === node.id} 
+                      isDragging={dragState.draggedNode?.id === node.id} 
+                    />
                   ))}
                 </div>
               )}
@@ -1003,6 +1212,45 @@ export default function DDPage() {
                   )}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Модальное окно подтверждения перемещения */}
+      {moveConfirmModal.visible && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200">
+              <h2 className="text-xl font-semibold text-gray-800">Подтверждение перемещения</h2>
+              <p className="text-sm text-gray-600 mt-1">
+                Вы уверены, что хотите переместить "{moveConfirmModal.sourceNode?.name}" в "{moveConfirmModal.targetNode?.name}"?
+              </p>
+            </div>
+            
+            <div className="p-6 flex justify-end gap-3">
+              <button
+                onClick={handleMoveCancel}
+                disabled={saving}
+                className="px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors disabled:opacity-50"
+              >
+                Отмена
+              </button>
+              
+              <button
+                onClick={handleMoveConfirm}
+                disabled={saving}
+                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors disabled:opacity-50"
+              >
+                {saving ? (
+                  <div className="flex items-center">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Перемещение...
+                  </div>
+                ) : (
+                  'Переместить'
+                )}
+              </button>
             </div>
           </div>
         </div>
