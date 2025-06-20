@@ -19,6 +19,62 @@ class DrawioExporter:
         self.min_child_spacing = 30  # Увеличиваем расстояние между дочерними элементами
         self.header_height = 50  # Высота заголовка
     
+    def _get_path_to_root(self, group):
+        """
+        Получает полный путь от корня до указанной группы
+        Возвращает список групп от корня до указанной группы (включительно)
+        """
+        path = []
+        current = group
+        
+        # Идем вверх по дереву до корня
+        while current is not None:
+            path.append(current)
+            current = current.parent
+        
+        # Переворачиваем, чтобы путь был от корня к группе
+        path.reverse()
+        return path
+    
+    def _build_tree_with_parents(self, target_group):
+        """
+        Строит дерево, которое содержит:
+        1. Полный путь от корня до target_group
+        2. Все дочерние элементы target_group (полное поддерево)
+        
+        Возвращает корневую группу этого дерева с временно модифицированными children
+        """
+        # Получаем путь от корня до целевой группы
+        path_to_target = self._get_path_to_root(target_group)
+        
+        if not path_to_target:
+            return target_group
+            
+        # Корневая группа - это первый элемент пути
+        root_group = path_to_target[0]
+        
+        # Сохраняем оригинальные children для восстановления потом
+        self._original_children = {}
+        
+        # Для каждой группы в пути (кроме последней) оставляем только следующую в пути
+        for i, group in enumerate(path_to_target[:-1]):
+            # Сохраняем оригинальные children
+            original_children = list(DdGroup.objects.filter(parent=group))
+            self._original_children[group.id] = original_children
+            
+            # Следующая группа в пути
+            next_group = path_to_target[i + 1]
+            
+            # Временно заменяем children на только следующую в пути
+            group._filtered_children = [next_group]
+        
+        # Для целевой группы оставляем всех детей (полное поддерево)
+        target_children = list(DdGroup.objects.filter(parent=target_group))
+        self._original_children[target_group.id] = target_children
+        target_group._filtered_children = target_children
+        
+        return root_group
+
     def export_dd_groups_to_drawio(self, root_group_id=None):
         """
         Экспортирует архитектуру в формат Draw.io
@@ -28,12 +84,19 @@ class DrawioExporter:
             # Экспортируем все корневые группы
             root_groups = list(DdGroup.objects.filter(parent=None))
         else:
+            # Получаем целевую группу
             if isinstance(root_group_id, int):
-                root_groups = [DdGroup.objects.get(id=root_group_id)]
-            elif isinstance(root_group_id, list):
-                root_groups = [DdGroup.objects.get(id=g) if isinstance(g, int) else g for g in root_group_id]
+                target_group = DdGroup.objects.get(id=root_group_id)
             else:
-                root_groups = [root_group_id]
+                target_group = root_group_id
+            
+            # Если это уже корневая группа - экспортируем как есть
+            if target_group.parent is None:
+                root_groups = [target_group]
+            else:
+                # Строим дерево с полным путем от корня
+                filtered_root = self._build_tree_with_parents(target_group)
+                root_groups = [filtered_root]
         
         # Создаем корневую структуру XML
         root = self._create_xml_structure()
@@ -271,7 +334,11 @@ class DrawioExporter:
         ПРОХОД 1: Рассчитывает размеры всех элементов снизу вверх
         Возвращает словарь {group_id: {'width': w, 'height': h, 'children': [...]}}
         """
-        children = list(DdGroup.objects.filter(parent=group))
+        # Используем отфильтрованные дети, если они есть, иначе обычные дети
+        if hasattr(group, '_filtered_children'):
+            children = group._filtered_children
+        else:
+            children = list(DdGroup.objects.filter(parent=group))
         
         # Если это листовой элемент - базовый размер
         if not children:

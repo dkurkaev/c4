@@ -888,6 +888,67 @@ export default function DDPage() {
     setMoveConfirmModal({ visible: false, sourceNode: null, targetNode: null });
   };
 
+  // Обработчик экспорта
+  const handleExport = async () => {
+    if (!contextMenu.node) return;
+
+    const node = contextMenu.node;
+    
+    // Экспорт доступен только для групп
+    if (node.type !== 'group') {
+      alert('Экспорт доступен только для групп');
+      setContextMenu({ visible: false, x: 0, y: 0, node: null });
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const groupId = (node.data as DDGroupAPI).id;
+      const endpoint = `${apiUrl}/api/architecture/dd-groups/export/drawio?root_group_id=${groupId}`;
+
+      const response = await fetch(endpoint, {
+        method: 'GET',
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // Получаем данные как blob для скачивания файла
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get('Content-Disposition');
+      
+      // Извлекаем имя файла из заголовка или создаем по умолчанию
+      let filename = `dd-export-${node.name}.drawio`;
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1].replace(/['"]/g, '');
+        }
+      }
+
+      // Создаем ссылку для скачивания
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      
+      // Очищаем ресурсы
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      setContextMenu({ visible: false, x: 0, y: 0, node: null });
+    } catch (err) {
+      console.error('Ошибка экспорта:', err);
+      alert('Ошибка при экспорте диаграммы');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   useEffect(() => {
     const fetchDDData = async () => {
       try {
@@ -1093,6 +1154,30 @@ export default function DDPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
             </svg>
             Создать новый элемент
+          </button>
+          
+          <button
+            onClick={handleExport}
+            disabled={contextMenu.node?.type !== 'group' || saving}
+            className={`w-full text-left px-4 py-2 flex items-center ${
+              contextMenu.node?.type === 'group' && !saving
+                ? 'hover:bg-gray-100 text-gray-700' 
+                : 'text-gray-400 cursor-not-allowed'
+            }`}
+            title={
+              contextMenu.node?.type !== 'group' 
+                ? 'Экспорт доступен только для групп' 
+                : 'Экспортировать в draw.io'
+            }
+          >
+            {saving ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-500 mr-2"></div>
+            ) : (
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            )}
+            Экспорт
           </button>
           
           <button
