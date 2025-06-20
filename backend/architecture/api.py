@@ -186,7 +186,7 @@ def delete_dd_group_type(request, dd_group_type_id: int):
 @router.get("/dd-groups", response=List[DdGroupSchema])
 def list_dd_groups(request):
     """Получить список всех групп DD"""
-    return DdGroup.objects.all()
+    return DdGroup.objects.select_related('type').all()
 
 
 @router.post("/dd-groups", response=DdGroupSchema)
@@ -338,7 +338,7 @@ def delete_c2_component(request, c2_component_id: int):
 @router.get("/dd-components", response=List[DdComponentSchema])
 def list_dd_components(request):
     """Получить список всех компонентов DD"""
-    return DdComponent.objects.all()
+    return DdComponent.objects.select_related('type').all()
 
 
 @router.post("/dd-components", response=DdComponentSchema)

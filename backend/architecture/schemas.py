@@ -46,8 +46,16 @@ class DdGroupSchema(Schema):
     parent_id: Optional[int] = None
     name: str
     type_id: int
+    type_name: str
     instances: Optional[int] = None
     specification: str
+
+    class Config:
+        from_attributes = True
+
+    @staticmethod
+    def resolve_type_name(obj):
+        return obj.type.name
 
 
 class DdGroupCreateSchema(Schema):
@@ -129,10 +137,18 @@ class DdComponentSchema(Schema):
     name: str
     c2_component_id: Optional[int] = None
     type_id: int
+    type_name: str
     technology: str
     description: str
     group_id: int
     is_external: bool
+
+    class Config:
+        from_attributes = True
+
+    @staticmethod
+    def resolve_type_name(obj):
+        return obj.type.name
 
 
 class DdComponentCreateSchema(Schema):

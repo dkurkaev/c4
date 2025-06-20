@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
+import { NodeDetailsCard } from './NodeDetailsCard';
 
 export function GroupTree({ groups, components }) {
   const [expandedNodes, setExpandedNodes] = useState(new Set(['root']));
+  const [selectedNode, setSelectedNode] = useState(null);
 
   if (!groups || groups.length === 0) {
     return (
@@ -60,19 +62,27 @@ export function GroupTree({ groups, components }) {
     setExpandedNodes(newExpanded);
   };
 
+  const selectNode = (node, type) => {
+    setSelectedNode({ ...node, nodeType: type });
+  };
+
   const renderComponent = (component, level) => {
     const paddingLeft = level * 20;
+    const isSelected = selectedNode && selectedNode.id === component.id && selectedNode.nodeType === 'component';
     
     return (
       <div key={`component-${component.id}`}>
         <div 
-          className="flex items-center py-2 px-3 rounded-lg"
+          className={`flex items-center py-2 px-3 rounded-lg cursor-pointer ${
+            isSelected ? 'bg-blue-100 border-l-4 border-blue-500' : ''
+          }`}
           style={{ 
             paddingLeft: `${paddingLeft}px`,
-            backgroundColor: 'transparent'
+            backgroundColor: isSelected ? '#dbeafe' : 'transparent'
           }}
-          onMouseEnter={(e) => e.target.style.backgroundColor = '#f3f4f6'}
-          onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+          onMouseEnter={(e) => !isSelected && (e.target.style.backgroundColor = '#f3f4f6')}
+          onMouseLeave={(e) => !isSelected && (e.target.style.backgroundColor = 'transparent')}
+          onClick={() => selectNode(component, 'component')}
         >
           {/* Отступ для стрелки */}
           <div style={{ width: '12px', height: '12px', marginRight: '8px' }} />
@@ -89,9 +99,6 @@ export function GroupTree({ groups, components }) {
           
           <span className="text-sm text-gray-700">
             {component.name || `Компонент ${component.id}`}
-            {component.technology && (
-              <span className="text-xs text-gray-500 ml-2">({component.technology})</span>
-            )}
           </span>
         </div>
       </div>
@@ -101,19 +108,30 @@ export function GroupTree({ groups, components }) {
   const renderTreeItem = (group, level = 0) => {
     const hasChildren = (group.children && group.children.length > 0) || (group.components && group.components.length > 0);
     const isExpanded = expandedNodes.has(group.id);
+    const isSelected = selectedNode && selectedNode.id === group.id && selectedNode.nodeType === 'group';
     const paddingLeft = level * 20;
     
     return (
       <div key={group.id}>
         <div 
-          className="flex items-center py-2 px-3 cursor-pointer rounded-lg"
+          className={`flex items-center py-2 px-3 cursor-pointer rounded-lg ${
+            isSelected ? 'bg-blue-100 border-l-4 border-blue-500' : ''
+          }`}
           style={{ 
             paddingLeft: `${paddingLeft}px`,
-            backgroundColor: isExpanded ? '#f9fafb' : 'transparent'
+            backgroundColor: isSelected ? '#dbeafe' : (isExpanded ? '#f9fafb' : 'transparent')
           }}
-          onMouseEnter={(e) => e.target.style.backgroundColor = '#f3f4f6'}
-          onMouseLeave={(e) => e.target.style.backgroundColor = isExpanded ? '#f9fafb' : 'transparent'}
-          onClick={() => hasChildren && toggleNode(group.id)}
+          onMouseEnter={(e) => !isSelected && (e.target.style.backgroundColor = '#f3f4f6')}
+          onMouseLeave={(e) => !isSelected && (e.target.style.backgroundColor = isSelected ? '#dbeafe' : (isExpanded ? '#f9fafb' : 'transparent'))}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (e.detail === 1) { // Одинарный клик - выбор
+              selectNode(group, 'group');
+            }
+            if (hasChildren && e.detail === 2) { // Двойной клик - разворот
+              toggleNode(group.id);
+            }
+          }}
         >
           {hasChildren ? (
             <svg 
@@ -127,6 +145,10 @@ export function GroupTree({ groups, components }) {
               fill="none" 
               stroke="currentColor" 
               viewBox="0 0 24 24"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleNode(group.id);
+              }}
             >
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
@@ -173,9 +195,18 @@ export function GroupTree({ groups, components }) {
       <div className="p-4 border-b">
         <h3 className="text-lg font-semibold text-gray-900">Структура DD</h3>
       </div>
-      <div className="p-4">
-        <div>
-          {hierarchicalGroups.map(group => renderTreeItem(group))}
+      
+      <div className="flex h-96">
+        {/* Левая половина - дерево */}
+        <div style={{ flexBasis: '50%' }} className="p-4 border-r overflow-y-auto overflow-x-auto">
+          <div>
+            {hierarchicalGroups.map(group => renderTreeItem(group))}
+          </div>
+        </div>
+        
+        {/* Правая половина - детали выбранного узла */}
+        <div style={{ flexBasis: '50%' }} className="p-4 overflow-y-auto">
+          <NodeDetailsCard selectedNode={selectedNode} />
         </div>
       </div>
     </div>
