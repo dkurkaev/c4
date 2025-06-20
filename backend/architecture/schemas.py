@@ -262,4 +262,23 @@ class C2LinksInfoObjectsUpdateSchema(Schema):
 
 # Error schema
 class ErrorSchema(Schema):
-    detail: str 
+    detail: str
+
+
+# Export schemas
+class ExportElementSchema(Schema):
+    element_id: int
+    element_type: str
+
+
+class ExportElementMultipleItemSchema(Schema):
+    id: int
+    type: str
+
+
+class ExportMultipleElementsSchema(Schema):
+    elements: List[ExportElementMultipleItemSchema]
+
+
+class ExportAllGroupsSchema(Schema):
+    root_group_id: Optional[int] = None 

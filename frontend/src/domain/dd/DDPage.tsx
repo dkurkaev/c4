@@ -893,26 +893,43 @@ export default function DDPage() {
     if (!contextMenu.node) return;
 
     const node = contextMenu.node;
-    
-    // Экспорт доступен только для групп
-    if (node.type !== 'group') {
-      alert('Экспорт доступен только для групп');
-      setContextMenu({ visible: false, x: 0, y: 0, node: null });
-      return;
-    }
 
     try {
       setSaving(true);
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const groupId = (node.data as DDGroupAPI).id;
-      const endpoint = `${apiUrl}/api/architecture/dd-groups/export/drawio?root_group_id=${groupId}`;
+      const endpoint = `${apiUrl}/api/architecture/export`;
+
+      // Определяем тип элемента и его ID
+      let elementType: string;
+      let elementId: number;
+
+      if (node.type === 'group') {
+        elementType = 'ddgroup';
+        elementId = (node.data as DDGroupAPI).id;
+      } else {
+        elementType = 'ddcomponent';
+        elementId = (node.data as DDComponentAPI).id;
+      }
+
+      // Подготавливаем тело запроса
+      const payload = {
+        element_id: elementId,
+        element_type: elementType
+      };
 
       const response = await fetch(endpoint, {
-        method: 'GET',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        // Пытаемся получить сообщение об ошибке из ответа
+        const errorData = await response.json().catch(() => null);
+        const errorMessage = errorData?.error || `HTTP error! status: ${response.status}`;
+        throw new Error(errorMessage);
       }
 
       // Получаем данные как blob для скачивания файла
@@ -920,7 +937,7 @@ export default function DDPage() {
       const contentDisposition = response.headers.get('Content-Disposition');
       
       // Извлекаем имя файла из заголовка или создаем по умолчанию
-      let filename = `dd-export-${node.name}.drawio`;
+      let filename = `${elementType}_${elementId}.drawio`;
       if (contentDisposition) {
         const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
         if (filenameMatch && filenameMatch[1]) {
@@ -943,7 +960,7 @@ export default function DDPage() {
       setContextMenu({ visible: false, x: 0, y: 0, node: null });
     } catch (err) {
       console.error('Ошибка экспорта:', err);
-      alert('Ошибка при экспорте диаграммы');
+      alert(`Ошибка при экспорте диаграммы: ${err instanceof Error ? err.message : 'Неизвестная ошибка'}`);
     } finally {
       setSaving(false);
     }
@@ -1158,17 +1175,13 @@ export default function DDPage() {
           
           <button
             onClick={handleExport}
-            disabled={contextMenu.node?.type !== 'group' || saving}
+            disabled={saving}
             className={`w-full text-left px-4 py-2 flex items-center ${
-              contextMenu.node?.type === 'group' && !saving
+              !saving
                 ? 'hover:bg-gray-100 text-gray-700' 
                 : 'text-gray-400 cursor-not-allowed'
             }`}
-            title={
-              contextMenu.node?.type !== 'group' 
-                ? 'Экспорт доступен только для групп' 
-                : 'Экспортировать в draw.io'
-            }
+            title="Экспортировать в draw.io"
           >
             {saving ? (
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-500 mr-2"></div>

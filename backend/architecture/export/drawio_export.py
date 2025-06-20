@@ -392,7 +392,7 @@ class DrawioExporter:
                 children_sizes.append(child_size)
             elif child_data['type'] == 'component':
                 # Компонент имеет фиксированный размер
-                component_style = DrawioPalette.get_style('dd_component')
+                component_style = DrawioPalette.get_component_style(child_data['object'])
                 child_size = {
                     'element_type': 'component',
                     'component': child_data['object'],
@@ -479,6 +479,7 @@ class DrawioExporter:
         layout = {
             'id': group_id,
             'element_type': 'group',
+            'group': group,
             'name': group.name,
             'x': x,
             'y': y,
@@ -558,7 +559,7 @@ class DrawioExporter:
     def _create_component_cell(self, component_info: Dict) -> ET.Element:
         """Создает XML элемент для компонента"""
         component = component_info['component']
-        component_style = DrawioPalette.get_style('dd_component')
+        component_style = DrawioPalette.get_component_style(component)
         
         # Определяем значения для отображения
         c4_name = component.name
@@ -597,10 +598,38 @@ class DrawioExporter:
     
     def _create_group_cell(self, group_info: Dict) -> ET.Element:
         """Создает XML элемент для группы"""
+        # Получаем объект группы из layout info
+        if 'group' in group_info:
+            group = group_info['group']
+        else:
+            # Fallback - пытаемся найти группу по имени (не должно происходить)
+            group = None
+        
         # Определяем значения для отображения
-        c4_name = group_info['name']
-        c4_instances = 'n'  # По умолчанию
-        c4_specifications = 'Type\nSpecifications'
+        c4_name = group_info['name'] if group_info.get('name') else 'Unknown'
+        
+        # Логика для экземпляров: если None или пусто -> "1", если 0 -> "n", иначе -> значение
+        if group and hasattr(group, 'instances'):
+            if group.instances is None or group.instances == '':
+                c4_instances = '1'
+            elif group.instances == 0:
+                c4_instances = 'n'
+            else:
+                c4_instances = str(group.instances)
+        else:
+            c4_instances = '1'  # По умолчанию
+        
+        # Формируем спецификации
+        if group:
+            type_name = group.type.name if group.type else 'Unknown Type'
+            specification = group.specification if group.specification else ''
+            
+            if specification.strip():  # Если спецификация не пустая
+                c4_specifications = f"{type_name}\n{specification}"
+            else:  # Если спецификация пустая - только тип в квадратных скобках
+                c4_specifications = f"{type_name}"
+        else:
+            c4_specifications = 'Unknown Type'
         
         # Создаем object элемент
         object_elem = ET.Element('object', {
@@ -651,4 +680,110 @@ class DrawioExporter:
         
         # Рекурсивно добавляем всех детей
         for child_layout in layout.get('children', []):
-            self._add_layout_to_xml(xml_root, child_layout) 
+            self._add_layout_to_xml(xml_root, child_layout)
+
+    def export_element_to_drawio(self, element_id: int, element_type: str):
+        """
+        Экспортирует элемент (группу или компонент) в формат Draw.io
+        
+        Args:
+            element_id: ID элемента
+            element_type: тип элемента ('ddgroup' или 'ddcomponent')
+        """
+        if element_type == 'ddgroup':
+            # Экспортируем группу - используем существующий метод
+            return self.export_dd_groups_to_drawio(element_id)
+        elif element_type == 'ddcomponent':
+            # Экспортируем компонент - нужно найти его родительскую группу
+            component = DdComponent.objects.get(id=element_id)
+            if component.group:
+                # Экспортируем группу, содержащую этот компонент
+                return self.export_dd_groups_to_drawio(component.group.id)
+            else:
+                # Компонент без группы - создаем минимальную диаграмму только с компонентом
+                return self._export_standalone_component(component)
+        else:
+            raise ValueError(f"Неподдерживаемый тип элемента: {element_type}")
+
+    def _export_standalone_component(self, component):
+        """
+        Экспортирует отдельный компонент без группы
+        """
+        # Создаем корневую структуру XML
+        root = self._create_xml_structure()
+        
+        # Получаем корневой элемент для добавления компонента
+        mxgraph_model = root.find('.//mxGraphModel')
+        mxgraph_root = mxgraph_model.find('root')
+        
+        # Создаем layout для компонента
+        component_style = DrawioPalette.get_component_style(component)
+        component_layout = {
+            'id': self.current_id,
+            'element_type': 'component',
+            'component': component,
+            'name': component.name,
+            'x': 0,
+            'y': 0,
+            'width': component_style.width,
+            'height': component_style.height,
+            'parent': '1',
+            'children': []
+        }
+        self.current_id += 1
+        
+        # Добавляем компонент в XML
+        self._add_layout_to_xml(mxgraph_root, component_layout)
+        
+        return self._xml_to_string(root)
+
+    def export_multiple_elements_to_drawio(self, elements: List[dict]):
+        """
+        Экспортирует несколько элементов в формат Draw.io
+        
+        Args:
+            elements: список элементов в формате [{"id": 1, "type": "ddgroup"}, {"id": 2, "type": "ddcomponent"}]
+        """
+        # Создаем корневую структуру XML
+        root = self._create_xml_structure()
+        
+        # Получаем корневой элемент для добавления элементов
+        mxgraph_model = root.find('.//mxGraphModel')
+        mxgraph_root = mxgraph_model.find('root')
+        
+        # Обрабатываем каждый элемент
+        start_x = 0
+        for element_info in elements:
+            element_id = element_info['id']
+            element_type = element_info['type']
+            
+            if element_type == 'ddgroup':
+                # Экспортируем группу
+                group = DdGroup.objects.get(id=element_id)
+                group_layout = self._calculate_group_layout(group, start_x, 0)
+                self._add_layout_to_xml(mxgraph_root, group_layout)
+                start_x += group_layout['width'] + self.group_spacing
+                
+            elif element_type == 'ddcomponent':
+                # Экспортируем компонент
+                component = DdComponent.objects.get(id=element_id)
+                component_style = DrawioPalette.get_component_style(component)
+                
+                component_layout = {
+                    'id': self.current_id,
+                    'element_type': 'component',
+                    'component': component,
+                    'name': component.name,
+                    'x': start_x,
+                    'y': 0,
+                    'width': component_style.width,
+                    'height': component_style.height,
+                    'parent': '1',
+                    'children': []
+                }
+                self.current_id += 1
+                
+                self._add_layout_to_xml(mxgraph_root, component_layout)
+                start_x += component_style.width + self.group_spacing
+        
+        return self._xml_to_string(root) 

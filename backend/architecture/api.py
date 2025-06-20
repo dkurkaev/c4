@@ -24,6 +24,7 @@ from .schemas import (
     DdLinkSchema, DdLinkCreateSchema, DdLinkUpdateSchema,
     C2LinkSchema, C2LinkCreateSchema, C2LinkUpdateSchema,
     C2LinksInfoObjectsSchema, C2LinksInfoObjectsCreateSchema, C2LinksInfoObjectsUpdateSchema,
+    ExportElementSchema, ExportMultipleElementsSchema, ExportAllGroupsSchema,
     ErrorSchema
 )
 from .export.drawio_export import DrawioExporter
@@ -564,33 +565,86 @@ def delete_c2_links_info_objects(request, c2_links_info_objects_id: int):
 
 
 # Экспорт в drawio
-@router.get("/dd-groups/export/drawio")
-def export_dd_groups_to_drawio(request, root_group_id: int = None):
-    """Экспортировать дерево DD групп в формат drawio XML"""
+# Унифицированные эндпоинты экспорта
+
+@router.post("/export")
+def export_single_element(request, payload: ExportElementSchema):
+    """Экспортировать один элемент в формат drawio XML
+    
+    Body: {"element_id": 1, "element_type": "ddgroup"}
+    """
     try:
+        element_id = payload.element_id
+        element_type = payload.element_type
+        
+        if element_type not in ['ddgroup', 'ddcomponent']:
+            return {"error": "Неподдерживаемый тип элемента. Используйте: ddgroup, ddcomponent"}
+        
+        exporter = DrawioExporter()
+        xml_content = exporter.export_element_to_drawio(element_id, element_type)
+        
+        response = HttpResponse(xml_content, content_type='application/xml')
+        response['Content-Disposition'] = f'attachment; filename="{element_type}_{element_id}.drawio"'
+        return response
+    except (DdGroup.DoesNotExist, DdComponent.DoesNotExist):
+        raise Http404("Элемент не найден")
+    except Exception as e:
+        return {"error": f"Ошибка при экспорте: {str(e)}"}
+
+
+@router.post("/export/multiple")
+def export_multiple_elements(request, payload: ExportMultipleElementsSchema):
+    """Экспортировать несколько элементов в формат drawio XML
+    
+    Body: {
+        "elements": [{"id": 1, "type": "ddgroup"}, {"id": 2, "type": "ddcomponent"}]
+    }
+    """
+    try:
+        elements = payload.elements
+        
+        if not elements:
+            return {"error": "Необходимо указать список элементов"}
+        
+        # Валидация элементов
+        for element in elements:
+            if element.type not in ['ddgroup', 'ddcomponent']:
+                return {"error": f"Неподдерживаемый тип элемента: {element.type}. Используйте: ddgroup, ddcomponent"}
+        
+        # Преобразуем в формат для экспортера
+        elements_data = [{"id": elem.id, "type": elem.type} for elem in elements]
+        
+        exporter = DrawioExporter()
+        xml_content = exporter.export_multiple_elements_to_drawio(elements_data)
+        
+        response = HttpResponse(xml_content, content_type='application/xml')
+        response['Content-Disposition'] = 'attachment; filename="multiple_elements.drawio"'
+        return response
+    except (DdGroup.DoesNotExist, DdComponent.DoesNotExist):
+        raise Http404("Один или несколько элементов не найдены")
+    except Exception as e:
+        return {"error": f"Ошибка при экспорте: {str(e)}"}
+
+
+@router.post("/export/all")
+def export_all_groups(request, payload: ExportAllGroupsSchema):
+    """Экспортировать все группы или начиная с определенной группы
+    
+    Body: {"root_group_id": 1} или {}
+    """
+    try:
+        root_group_id = payload.root_group_id
+        
         exporter = DrawioExporter()
         xml_content = exporter.export_dd_groups_to_drawio(root_group_id)
         
         response = HttpResponse(xml_content, content_type='application/xml')
-        response['Content-Disposition'] = 'attachment; filename="dd_groups.drawio"'
+        if root_group_id:
+            response['Content-Disposition'] = f'attachment; filename="dd_groups_from_{root_group_id}.drawio"'
+        else:
+            response['Content-Disposition'] = 'attachment; filename="all_dd_groups.drawio"'
         return response
     except DdGroup.DoesNotExist:
         raise Http404("Группа DD не найдена")
     except Exception as e:
         return {"error": f"Ошибка при экспорте: {str(e)}"}
-
-
-@router.get("/dd-groups/{dd_group_id}/export/drawio")
-def export_dd_group_tree_to_drawio(request, dd_group_id: int):
-    """Экспортировать дерево DD групп начиная с указанной группы в формат drawio XML"""
-    try:
-        exporter = DrawioExporter()
-        xml_content = exporter.export_dd_groups_to_drawio(dd_group_id)
-        
-        response = HttpResponse(xml_content, content_type='application/xml')
-        response['Content-Disposition'] = f'attachment; filename="dd_group_{dd_group_id}.drawio"'
-        return response
-    except DdGroup.DoesNotExist:
-        raise Http404("Группа DD не найдена")
-    except Exception as e:
-        return {"error": f"Ошибка при экспорте: {str(e)}"} 
