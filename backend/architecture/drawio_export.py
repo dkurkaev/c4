@@ -140,51 +140,66 @@ class DrawioExporter:
     
     def _calculate_optimal_layout(self, children_sizes):
         """
-        Алгоритм bin packing для оптимального размещения элементов разного размера
-        Returns: список позиций [(x, y, width, height), ...] и общие размеры (total_width, total_height)
+        Умный алгоритм размещения элементов в строки с анализом размеров
+        Большие элементы размещаются в отдельных строках, маленькие группируются
         """
         if not children_sizes:
             return [], 0, 0
         
-        # Сортируем элементы по убыванию площади для лучшей упаковки
+        # Сортируем элементы по убыванию площади
         sorted_children = sorted(children_sizes, key=lambda x: x['width'] * x['height'], reverse=True)
         
-        # Список строк: каждая строка содержит [элементы, текущая_ширина, высота_строки]
+        # Определяем пороговую ширину - если элемент шире, он идет в отдельную строку
+        max_width = max(child['width'] for child in sorted_children)
+        width_threshold = max_width * 0.6  # 60% от самого широкого элемента
+        
+        # Группируем элементы по строкам
         rows = []
         
         for child in sorted_children:
             child_width = child['width']
             child_height = child['height']
             
-            # Ищем строку, куда поместится элемент (первая подходящая)
-            placed = False
-            for row in rows:
-                elements, current_width, row_height = row
+            # Если элемент широкий - размещаем в отдельной строке
+            if child_width >= width_threshold:
+                rows.append({
+                    'elements': [child],
+                    'width': child_width,
+                    'height': child_height,
+                    'is_single': True
+                })
+            else:
+                # Ищем строку, куда поместится маленький элемент
+                placed = False
+                max_row_width = 1200  # Максимальная ширина строки для маленьких элементов
                 
-                # Проверяем, поместится ли элемент в строку
-                # Оставляем место для отступов между элементами
-                if len(elements) == 0 or current_width + self.min_child_spacing + child_width <= self._get_max_row_width():
-                    # Добавляем элемент в строку
-                    elements.append(child)
-                    row[1] = current_width + (self.min_child_spacing if elements else 0) + child_width
-                    row[2] = max(row_height, child_height)  # Высота строки = максимальная высота элементов
-                    placed = True
-                    break
-            
-            # Если не поместился ни в одну строку - создаем новую
-            if not placed:
-                rows.append([[child], child_width, child_height])
+                for row in rows:
+                    if not row['is_single']:  # Только в строки с несколькими элементами
+                        if row['width'] + self.min_child_spacing + child_width <= max_row_width:
+                            row['elements'].append(child)
+                            row['width'] += self.min_child_spacing + child_width
+                            row['height'] = max(row['height'], child_height)
+                            placed = True
+                            break
+                
+                # Если не поместился - создаем новую строку для маленьких элементов
+                if not placed:
+                    rows.append({
+                        'elements': [child],
+                        'width': child_width,
+                        'height': child_height,
+                        'is_single': False
+                    })
         
-        # Рассчитываем позиции элементов
+        # Преобразуем строки в позиции элементов
         positions = []
         current_y = 0
         total_width = 0
         
         for row in rows:
-            elements, row_width, row_height = row
             current_x = 0
             
-            for element in elements:
+            for element in row['elements']:
                 positions.append({
                     'element': element,
                     'x': current_x,
@@ -194,21 +209,14 @@ class DrawioExporter:
                 })
                 current_x += element['width'] + self.min_child_spacing
             
-            total_width = max(total_width, row_width)
-            current_y += row_height + self.min_child_spacing
+            total_width = max(total_width, row['width'])
+            current_y += row['height'] + self.min_child_spacing
         
         # Убираем лишний отступ снизу
         total_height = current_y - self.min_child_spacing if current_y > 0 else 0
         
         return positions, total_width, total_height
     
-    def _get_max_row_width(self):
-        """
-        Максимальная ширина строки для bin packing
-        Можно настроить в зависимости от требований
-        """
-        return 1500  # Примерное ограничение ширины строки
-
     def _calculate_grid_layout(self, num_children):
         """
         Рассчитывает оптимальную сетку для размещения элементов одинакового размера
@@ -231,19 +239,32 @@ class DrawioExporter:
     def _should_use_bin_packing(self, children_sizes):
         """
         Определяет, нужно ли использовать bin packing или простую сетку
-        Bin packing используется только если элементы имеют разные размеры
+        Bin packing используется если:
+        1. Элементы имеют разные размеры
+        2. Есть элементы, которые значительно больше других
         """
         if not children_sizes:
             return False
         
         # Получаем размеры всех элементов
         sizes = [(child['width'], child['height']) for child in children_sizes]
+        areas = [size[0] * size[1] for size in sizes]
         
         # Если все элементы одинакового размера - используем простую сетку
         first_size = sizes[0]
         all_same_size = all(size == first_size for size in sizes)
         
-        return not all_same_size
+        if all_same_size:
+            return False
+        
+        # Если есть элементы, которые в 2+ раза больше других - используем bin packing
+        min_area = min(areas)
+        max_area = max(areas)
+        
+        if max_area >= 2 * min_area:
+            return True
+        
+        return False
 
     def _calculate_sizes_bottom_up(self, group):
         """
