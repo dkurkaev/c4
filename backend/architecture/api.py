@@ -26,7 +26,7 @@ from .schemas import (
     C2LinksInfoObjectsSchema, C2LinksInfoObjectsCreateSchema, C2LinksInfoObjectsUpdateSchema,
     ErrorSchema
 )
-from .drawio_export import DrawioExporter
+from .export.drawio_export import DrawioExporter
 
 router = Router()
 
