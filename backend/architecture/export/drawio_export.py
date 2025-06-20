@@ -4,7 +4,8 @@
 
 import xml.etree.ElementTree as ET
 from typing import List, Dict, Tuple
-from .models import DdGroup
+from ..models import DdGroup
+from .palette import DrawioPalette
 
 
 class DrawioExporter:
@@ -13,11 +14,18 @@ class DrawioExporter:
     def __init__(self):
         self.cell_id_counter = 2  # Начинаем с 2, так как 0 и 1 зарезервированы
         self.current_id = 2  # Для нового алгоритма
-        self.base_width = 240
-        self.base_height = 120
-        self.padding = 30  # Увеличиваем отступы
-        self.min_child_spacing = 30  # Увеличиваем расстояние между дочерними элементами
-        self.header_height = 50  # Высота заголовка
+        
+        # Получаем настройки из палитры
+        self.dd_group_style = DrawioPalette.get_style('dd_group')
+        self.spacing = DrawioPalette.get_default_spacing()
+        
+        # Устанавливаем размеры и отступы из палитры
+        self.base_width = self.dd_group_style.width
+        self.base_height = self.dd_group_style.height
+        self.padding = self.dd_group_style.padding
+        self.min_child_spacing = self.dd_group_style.min_spacing
+        self.header_height = self.dd_group_style.header_height
+        self.group_spacing = self.spacing['group_spacing']
     
     def _get_path_to_root(self, group):
         """
@@ -115,7 +123,7 @@ class DrawioExporter:
             self._add_layout_to_xml(mxgraph_root, group_layout)
             
             # Сдвигаем позицию для следующей группы
-            start_x += group_layout['width'] + 100
+            start_x += group_layout['width'] + self.group_spacing
         
         return self._xml_to_string(root)
     
@@ -478,15 +486,15 @@ class DrawioExporter:
         object_elem = ET.Element('object', {
             'placeholders': '1',
             'c4Name': c4_name,
-            'label': '<font style="font-size: 16px"><b><div style="text-align: left">%c4Name% x %c4Instances%</div></b></font><div style="text-align: left">[<span style="background-color: initial;">%c4Specifications%]</span></div>',
+            'label': self.dd_group_style.label_template,
             'c4Instances': c4_instances,
             'c4Specifications': c4_specifications,
             'id': str(group_info['id'])
         })
         
-        # Создаем mxCell элемент
+        # Создаем mxCell элемент с стилем из палитры
         mx_cell = ET.SubElement(object_elem, 'mxCell', {
-            'style': 'rounded=1;fontSize=11;whiteSpace=wrap;html=1;dashed=1;arcSize=20;fillColor=none;strokeColor=#06315C;fontColor=#000;labelBackgroundColor=none;align=left;verticalAlign=bottom;labelBorderColor=none;spacingTop=0;spacing=10;dashPattern=8 4;metaEdit=1;rotatable=0;perimeter=rectanglePerimeter;noLabel=0;labelPadding=0;allowArrows=0;;connectable=1;expand=0;recursiveResize=0;editable=1;pointerEvents=0;absoluteArcSize=1;points=[[0.25,0,0],[0.5,0,0],[0.75,0,0],[1,0.25,0],[1,0.5,0],[1,0.75,0],[0.75,1,0],[0.5,1,0],[0.25,1,0],[0,0.75,0],[0,0.5,0],[0,0.25,0]];strokeWidth=2;container=1;imageAlign=right;imageVerticalAlign=bottom;direction=east;collapsible=0;',
+            'style': self.dd_group_style.style,
             'vertex': '1',
             'parent': str(group_info.get('parent', '1'))
         })
