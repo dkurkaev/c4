@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-export function GroupTree({ groups }) {
+export function GroupTree({ groups, components }) {
   const [expandedNodes, setExpandedNodes] = useState(new Set(['root']));
 
   if (!groups || groups.length === 0) {
@@ -14,17 +14,29 @@ export function GroupTree({ groups }) {
     );
   }
 
-  // Строим иерархию групп
-  const buildHierarchy = (groups) => {
+  // Строим иерархию групп и добавляем компоненты
+  const buildHierarchy = (groups, components = []) => {
     const groupMap = {};
     const rootGroups = [];
 
     // Создаем карту групп
     groups.forEach(group => {
-      groupMap[group.id] = { ...group, children: [] };
+      groupMap[group.id] = { ...group, children: [], components: [] };
     });
 
-    // Строим иерархию
+    // Добавляем компоненты к соответствующим группам
+    if (components) {
+      components.forEach(component => {
+        if (groupMap[component.group_id]) {
+          groupMap[component.group_id].components.push({
+            ...component,
+            type: 'component' // Помечаем как компонент
+          });
+        }
+      });
+    }
+
+    // Строим иерархию групп
     groups.forEach(group => {
       if (group.parent_id && groupMap[group.parent_id]) {
         groupMap[group.parent_id].children.push(groupMap[group.id]);
@@ -36,7 +48,7 @@ export function GroupTree({ groups }) {
     return rootGroups;
   };
 
-  const hierarchicalGroups = buildHierarchy(groups);
+  const hierarchicalGroups = buildHierarchy(groups, components);
 
   const toggleNode = (nodeId) => {
     const newExpanded = new Set(expandedNodes);
@@ -48,8 +60,46 @@ export function GroupTree({ groups }) {
     setExpandedNodes(newExpanded);
   };
 
+  const renderComponent = (component, level) => {
+    const paddingLeft = level * 20;
+    
+    return (
+      <div key={`component-${component.id}`}>
+        <div 
+          className="flex items-center py-2 px-3 rounded-lg"
+          style={{ 
+            paddingLeft: `${paddingLeft}px`,
+            backgroundColor: 'transparent'
+          }}
+          onMouseEnter={(e) => e.target.style.backgroundColor = '#f3f4f6'}
+          onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+        >
+          {/* Отступ для стрелки */}
+          <div style={{ width: '12px', height: '12px', marginRight: '8px' }} />
+          
+          {/* Иконка компонента - круг */}
+          <svg 
+            style={{ width: '16px', height: '16px', marginRight: '8px' }}
+            className="text-green-500"
+            fill="currentColor" 
+            viewBox="0 0 24 24"
+          >
+            <circle cx="12" cy="12" r="10" />
+          </svg>
+          
+          <span className="text-sm text-gray-700">
+            {component.name || `Компонент ${component.id}`}
+            {component.technology && (
+              <span className="text-xs text-gray-500 ml-2">({component.technology})</span>
+            )}
+          </span>
+        </div>
+      </div>
+    );
+  };
+
   const renderTreeItem = (group, level = 0) => {
-    const hasChildren = group.children && group.children.length > 0;
+    const hasChildren = (group.children && group.children.length > 0) || (group.components && group.components.length > 0);
     const isExpanded = expandedNodes.has(group.id);
     const paddingLeft = level * 20;
     
@@ -84,6 +134,7 @@ export function GroupTree({ groups }) {
             <div style={{ width: '12px', height: '12px', marginRight: '8px' }} />
           )}
           
+          {/* Иконка группы - папка */}
           <svg 
             style={{ width: '16px', height: '16px', marginRight: '8px' }}
             className="text-blue-500"
@@ -106,7 +157,11 @@ export function GroupTree({ groups }) {
 
         {hasChildren && isExpanded && (
           <div>
-            {group.children.map(child => renderTreeItem(child, level + 1))}
+            {/* Сначала отображаем дочерние группы */}
+            {group.children && group.children.map(child => renderTreeItem(child, level + 1))}
+            
+            {/* Затем отображаем компоненты */}
+            {group.components && group.components.map(component => renderComponent(component, level + 1))}
           </div>
         )}
       </div>
@@ -116,7 +171,7 @@ export function GroupTree({ groups }) {
   return (
     <div className="bg-white rounded-lg border">
       <div className="p-4 border-b">
-        <h3 className="text-lg font-semibold text-gray-900">Структура групп DD</h3>
+        <h3 className="text-lg font-semibold text-gray-900">Структура DD</h3>
       </div>
       <div className="p-4">
         <div>
