@@ -138,6 +138,113 @@ class DrawioExporter:
         
         return layout
     
+    def _calculate_optimal_layout(self, children_sizes):
+        """
+        Алгоритм bin packing для оптимального размещения элементов разного размера
+        Returns: список позиций [(x, y, width, height), ...] и общие размеры (total_width, total_height)
+        """
+        if not children_sizes:
+            return [], 0, 0
+        
+        # Сортируем элементы по убыванию площади для лучшей упаковки
+        sorted_children = sorted(children_sizes, key=lambda x: x['width'] * x['height'], reverse=True)
+        
+        # Список строк: каждая строка содержит [элементы, текущая_ширина, высота_строки]
+        rows = []
+        
+        for child in sorted_children:
+            child_width = child['width']
+            child_height = child['height']
+            
+            # Ищем строку, куда поместится элемент (первая подходящая)
+            placed = False
+            for row in rows:
+                elements, current_width, row_height = row
+                
+                # Проверяем, поместится ли элемент в строку
+                # Оставляем место для отступов между элементами
+                if len(elements) == 0 or current_width + self.min_child_spacing + child_width <= self._get_max_row_width():
+                    # Добавляем элемент в строку
+                    elements.append(child)
+                    row[1] = current_width + (self.min_child_spacing if elements else 0) + child_width
+                    row[2] = max(row_height, child_height)  # Высота строки = максимальная высота элементов
+                    placed = True
+                    break
+            
+            # Если не поместился ни в одну строку - создаем новую
+            if not placed:
+                rows.append([[child], child_width, child_height])
+        
+        # Рассчитываем позиции элементов
+        positions = []
+        current_y = 0
+        total_width = 0
+        
+        for row in rows:
+            elements, row_width, row_height = row
+            current_x = 0
+            
+            for element in elements:
+                positions.append({
+                    'element': element,
+                    'x': current_x,
+                    'y': current_y,
+                    'width': element['width'],
+                    'height': element['height']
+                })
+                current_x += element['width'] + self.min_child_spacing
+            
+            total_width = max(total_width, row_width)
+            current_y += row_height + self.min_child_spacing
+        
+        # Убираем лишний отступ снизу
+        total_height = current_y - self.min_child_spacing if current_y > 0 else 0
+        
+        return positions, total_width, total_height
+    
+    def _get_max_row_width(self):
+        """
+        Максимальная ширина строки для bin packing
+        Можно настроить в зависимости от требований
+        """
+        return 1500  # Примерное ограничение ширины строки
+
+    def _calculate_grid_layout(self, num_children):
+        """
+        Рассчитывает оптимальную сетку для размещения элементов одинакового размера
+        Returns: (cols, rows) - количество колонок и строк
+        """
+        if num_children <= 3:
+            return (num_children, 1)  # Горизонтальная линия
+        elif num_children == 4:
+            return (2, 2)  # Квадрат 2x2
+        elif num_children == 5:
+            return (3, 2)  # 3 элемента в первой строке, 2 во второй
+        elif num_children == 6:
+            return (3, 2)  # Сетка 3x2
+        else:
+            # Для больших количеств стремимся к квадратной форме
+            cols = int(num_children ** 0.5) + 1
+            rows = (num_children + cols - 1) // cols  # Округление вверх
+            return (cols, rows)
+
+    def _should_use_bin_packing(self, children_sizes):
+        """
+        Определяет, нужно ли использовать bin packing или простую сетку
+        Bin packing используется только если элементы имеют разные размеры
+        """
+        if not children_sizes:
+            return False
+        
+        # Получаем размеры всех элементов
+        sizes = [(child['width'], child['height']) for child in children_sizes]
+        
+        # Если все элементы одинакового размера - используем простую сетку
+        first_size = sizes[0]
+        all_same_size = all(size == first_size for size in sizes)
+        
+        return not all_same_size
+
     def _calculate_sizes_bottom_up(self, group):
         """
         ПРОХОД 1: Рассчитывает размеры всех элементов снизу вверх
@@ -156,29 +263,54 @@ class DrawioExporter:
         
         # Рекурсивно получаем размеры всех детей
         children_sizes = []
-        total_children_width = 0
-        max_child_height = 0
-        
         for child in children:
             child_size = self._calculate_sizes_bottom_up(child)
             children_sizes.append(child_size)
-            total_children_width += child_size['width']
-            max_child_height = max(max_child_height, child_size['height'])
         
-        # Добавляем отступы между детьми
-        if len(children) > 1:
-            total_children_width += (len(children) - 1) * self.min_child_spacing
-        
-        # Рассчитываем размер родителя
-        parent_width = max(self.base_width, total_children_width + 2 * self.padding)
-        parent_height = max(self.base_height, max_child_height + self.header_height + 2 * self.padding)
-        
-        return {
-            'group': group,
-            'width': parent_width,
-            'height': parent_height,
-            'children': children_sizes
-        }
+        # Выбираем алгоритм размещения
+        if self._should_use_bin_packing(children_sizes):
+            # Используем bin packing для элементов разного размера
+            positions, content_width, content_height = self._calculate_optimal_layout(children_sizes)
+            
+            parent_width = max(self.base_width, content_width + 2 * self.padding)
+            parent_height = max(self.base_height, content_height + self.header_height + 2 * self.padding)
+            
+            return {
+                'group': group,
+                'width': parent_width,
+                'height': parent_height,
+                'children': children_sizes,
+                'positions': positions,  # Сохраняем рассчитанные позиции
+                'content_width': content_width,
+                'content_height': content_height,
+                'layout_type': 'bin_packing'
+            }
+        else:
+            # Используем простую сетку для элементов одинакового размера
+            cols, rows = self._calculate_grid_layout(len(children))
+            
+            # Находим максимальные размеры среди детей (они все одинаковые)
+            max_child_width = max(child['width'] for child in children_sizes)
+            max_child_height = max(child['height'] for child in children_sizes)
+            
+            # Рассчитываем размер родителя на основе сетки
+            total_width = cols * max_child_width + (cols - 1) * self.min_child_spacing
+            total_height = rows * max_child_height + (rows - 1) * self.min_child_spacing
+            
+            parent_width = max(self.base_width, total_width + 2 * self.padding)
+            parent_height = max(self.base_height, total_height + self.header_height + 2 * self.padding)
+            
+            return {
+                'group': group,
+                'width': parent_width,
+                'height': parent_height,
+                'children': children_sizes,
+                'grid_cols': cols,
+                'grid_rows': rows,
+                'max_child_width': max_child_width,
+                'max_child_height': max_child_height,
+                'layout_type': 'grid'
+            }
     
     def _calculate_positions_top_down(self, group, size_info, x, y, parent_id):
         """
@@ -198,25 +330,52 @@ class DrawioExporter:
             'children': []
         }
         
-        # Если есть дети - рассчитываем их координаты
+        # Выбираем способ размещения детей в зависимости от типа layout
         if size_info['children']:
-            # Первый ребенок размещается в (30,30) относительно родителя
-            child_x = 30
-            child_y = 30
+            layout_type = size_info.get('layout_type', 'grid')
             
-            for child_size in size_info['children']:
-                # Рекурсивно рассчитываем координаты ребенка
-                child_layout = self._calculate_positions_top_down(
-                    child_size['group'], 
-                    child_size, 
-                    child_x, 
-                    child_y, 
-                    group_id
-                )
-                layout['children'].append(child_layout)
+            if layout_type == 'bin_packing':
+                # Используем предрассчитанные позиции из bin packing
+                for pos_info in size_info['positions']:
+                    child_size = pos_info['element']
+                    
+                    # Рассчитываем абсолютные координаты (относительно родителя + отступ)
+                    child_x = 30 + pos_info['x']
+                    child_y = 30 + pos_info['y']
+                    
+                    # Рекурсивно рассчитываем координаты ребенка
+                    child_layout = self._calculate_positions_top_down(
+                        child_size['group'], 
+                        child_size, 
+                        child_x, 
+                        child_y, 
+                        group_id
+                    )
+                    layout['children'].append(child_layout)
+            else:
+                # Используем простую сетку
+                cols = size_info.get('grid_cols', 1)
+                max_child_width = size_info.get('max_child_width', self.base_width)
+                max_child_height = size_info.get('max_child_height', self.base_height)
                 
-                # Сдвигаем позицию для следующего ребенка (горизонтально)
-                child_x += child_size['width'] + self.min_child_spacing
+                for i, child_size in enumerate(size_info['children']):
+                    # Определяем позицию в сетке
+                    col = i % cols
+                    row = i // cols
+                    
+                    # Рассчитываем координаты ребенка в сетке
+                    child_x = 30 + col * (max_child_width + self.min_child_spacing)
+                    child_y = 30 + row * (max_child_height + self.min_child_spacing)
+                    
+                    # Рекурсивно рассчитываем координаты ребенка
+                    child_layout = self._calculate_positions_top_down(
+                        child_size['group'], 
+                        child_size, 
+                        child_x, 
+                        child_y, 
+                        group_id
+                    )
+                    layout['children'].append(child_layout)
         
         return layout
     
