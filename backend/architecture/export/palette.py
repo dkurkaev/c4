@@ -40,6 +40,16 @@ class DrawioPalette:
             min_spacing=30
         ),
         
+        'dd_component': ElementStyle(
+            width=240,
+            height=120,
+            style='rounded=1;whiteSpace=wrap;html=1;labelBackgroundColor=none;fillColor=#23A2D9;fontColor=#ffffff;align=center;arcSize=6;strokeColor=#0E7DAD;metaEdit=1;resizable=1;points=[[0.25,0,0],[0.5,0,0],[0.75,0,0],[1,0.25,0],[1,0.5,0],[1,0.75,0],[0.75,1,0],[0.5,1,0],[0.25,1,0],[0,0.75,0],[0,0.5,0],[0,0.25,0]];fontSize=14;strokeWidth=3;allowArrows=0;rotatable=0;',
+            label_template='<font style="font-size: 16px"><b>%c4Name%</b></font><div>[%c4Type%: %c4Technology%]</div><br><div><font style="font-size: 11px">%c4Description%</font></div>',
+            padding=0,  # Компоненты не имеют детей, отступы не нужны
+            header_height=0,
+            min_spacing=0
+        ),
+        
         # Заготовки для будущих типов элементов
         'component': ElementStyle(
             width=200,

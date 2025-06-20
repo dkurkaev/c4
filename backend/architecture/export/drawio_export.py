@@ -4,7 +4,7 @@
 
 import xml.etree.ElementTree as ET
 from typing import List, Dict, Tuple
-from ..models import DdGroup
+from ..models import DdGroup, DdComponent
 from .palette import DrawioPalette
 
 
@@ -26,6 +26,31 @@ class DrawioExporter:
         self.min_child_spacing = self.dd_group_style.min_spacing
         self.header_height = self.dd_group_style.header_height
         self.group_spacing = self.spacing['group_spacing']
+    
+    def _get_group_children(self, group):
+        """
+        Получает всех детей группы: подгруппы и компоненты
+        Возвращает список объектов с указанием типа
+        """
+        children = []
+        
+        # Добавляем подгруппы
+        subgroups = list(DdGroup.objects.filter(parent=group))
+        for subgroup in subgroups:
+            children.append({
+                'type': 'group',
+                'object': subgroup
+            })
+        
+        # Добавляем компоненты
+        components = list(DdComponent.objects.filter(group=group))
+        for component in components:
+            children.append({
+                'type': 'component', 
+                'object': component
+            })
+        
+        return children
     
     def _get_path_to_root(self, group):
         """
@@ -67,17 +92,17 @@ class DrawioExporter:
         # Для каждой группы в пути (кроме последней) оставляем только следующую в пути
         for i, group in enumerate(path_to_target[:-1]):
             # Сохраняем оригинальные children
-            original_children = list(DdGroup.objects.filter(parent=group))
+            original_children = self._get_group_children(group)
             self._original_children[group.id] = original_children
             
             # Следующая группа в пути
             next_group = path_to_target[i + 1]
             
             # Временно заменяем children на только следующую в пути
-            group._filtered_children = [next_group]
+            group._filtered_children = [{'type': 'group', 'object': next_group}]
         
         # Для целевой группы оставляем всех детей (полное поддерево)
-        target_children = list(DdGroup.objects.filter(parent=target_group))
+        target_children = self._get_group_children(target_group)
         self._original_children[target_group.id] = target_children
         target_group._filtered_children = target_children
         
@@ -342,15 +367,16 @@ class DrawioExporter:
         ПРОХОД 1: Рассчитывает размеры всех элементов снизу вверх
         Возвращает словарь {group_id: {'width': w, 'height': h, 'children': [...]}}
         """
-        # Используем отфильтрованные дети, если они есть, иначе обычные дети
+        # Используем отфильтрованные дети, если они есть, иначе получаем всех детей
         if hasattr(group, '_filtered_children'):
-            children = group._filtered_children
+            children_data = group._filtered_children
         else:
-            children = list(DdGroup.objects.filter(parent=group))
+            children_data = self._get_group_children(group)
         
         # Если это листовой элемент - базовый размер
-        if not children:
+        if not children_data:
             return {
+                'element_type': 'group',
                 'group': group,
                 'width': self.base_width,  # 240
                 'height': self.base_height,  # 120
@@ -359,9 +385,22 @@ class DrawioExporter:
         
         # Рекурсивно получаем размеры всех детей
         children_sizes = []
-        for child in children:
-            child_size = self._calculate_sizes_bottom_up(child)
-            children_sizes.append(child_size)
+        for child_data in children_data:
+            if child_data['type'] == 'group':
+                # Рекурсивно обрабатываем подгруппу
+                child_size = self._calculate_sizes_bottom_up(child_data['object'])
+                children_sizes.append(child_size)
+            elif child_data['type'] == 'component':
+                # Компонент имеет фиксированный размер
+                component_style = DrawioPalette.get_style('dd_component')
+                child_size = {
+                    'element_type': 'component',
+                    'component': child_data['object'],
+                    'width': component_style.width,
+                    'height': component_style.height,
+                    'children': []  # У компонентов нет детей
+                }
+                children_sizes.append(child_size)
         
         # Выбираем алгоритм размещения
         if self._should_use_bin_packing(children_sizes):
@@ -372,6 +411,7 @@ class DrawioExporter:
             parent_height = max(self.base_height, content_height + self.header_height + 2 * self.padding)
             
             return {
+                'element_type': 'group',
                 'group': group,
                 'width': parent_width,
                 'height': parent_height,
@@ -383,7 +423,7 @@ class DrawioExporter:
             }
         else:
             # Используем простую сетку для элементов одинакового размера
-            cols, rows = self._calculate_grid_layout(len(children))
+            cols, rows = self._calculate_grid_layout(len(children_sizes))
             
             # Находим максимальные размеры среди детей (они все одинаковые)
             max_child_width = max(child['width'] for child in children_sizes)
@@ -397,6 +437,7 @@ class DrawioExporter:
             parent_height = max(self.base_height, total_height + self.header_height + 2 * self.padding)
             
             return {
+                'element_type': 'group',
                 'group': group,
                 'width': parent_width,
                 'height': parent_height,
@@ -412,11 +453,32 @@ class DrawioExporter:
         """
         ПРОХОД 2: Рассчитывает абсолютные координаты сверху вниз
         """
+        # Проверяем тип элемента
+        if size_info.get('element_type') == 'component':
+            # Для компонента просто возвращаем его информацию
+            component_id = self.current_id
+            self.current_id += 1
+            
+            return {
+                'id': component_id,
+                'element_type': 'component',
+                'component': size_info['component'],
+                'name': size_info['component'].name,
+                'x': x,
+                'y': y,
+                'width': size_info['width'],
+                'height': size_info['height'],
+                'parent': parent_id,
+                'children': []
+            }
+        
+        # Для группы
         group_id = self.current_id
         self.current_id += 1
         
         layout = {
             'id': group_id,
+            'element_type': 'group',
             'name': group.name,
             'x': x,
             'y': y,
@@ -440,13 +502,22 @@ class DrawioExporter:
                     child_y = 30 + pos_info['y']
                     
                     # Рекурсивно рассчитываем координаты ребенка
-                    child_layout = self._calculate_positions_top_down(
-                        child_size['group'], 
-                        child_size, 
-                        child_x, 
-                        child_y, 
-                        group_id
-                    )
+                    if child_size.get('element_type') == 'component':
+                        child_layout = self._calculate_positions_top_down(
+                            None,  # Для компонента group не нужен
+                            child_size, 
+                            child_x, 
+                            child_y, 
+                            group_id
+                        )
+                    else:
+                        child_layout = self._calculate_positions_top_down(
+                            child_size['group'], 
+                            child_size, 
+                            child_x, 
+                            child_y, 
+                            group_id
+                        )
                     layout['children'].append(child_layout)
             else:
                 # Используем простую сетку
@@ -464,16 +535,65 @@ class DrawioExporter:
                     child_y = 30 + row * (max_child_height + self.min_child_spacing)
                     
                     # Рекурсивно рассчитываем координаты ребенка
-                    child_layout = self._calculate_positions_top_down(
-                        child_size['group'], 
-                        child_size, 
-                        child_x, 
-                        child_y, 
-                        group_id
-                    )
+                    if child_size.get('element_type') == 'component':
+                        child_layout = self._calculate_positions_top_down(
+                            None,  # Для компонента group не нужен
+                            child_size, 
+                            child_x, 
+                            child_y, 
+                            group_id
+                        )
+                    else:
+                        child_layout = self._calculate_positions_top_down(
+                            child_size['group'], 
+                            child_size, 
+                            child_x, 
+                            child_y, 
+                            group_id
+                        )
                     layout['children'].append(child_layout)
         
         return layout
+    
+    def _create_component_cell(self, component_info: Dict) -> ET.Element:
+        """Создает XML элемент для компонента"""
+        component = component_info['component']
+        component_style = DrawioPalette.get_style('dd_component')
+        
+        # Определяем значения для отображения
+        c4_name = component.name
+        c4_type = component.type.name if component.type else 'Component'
+        c4_technology = component.technology or 'Technology'
+        c4_description = component.description or 'Description'
+        
+        # Создаем object элемент
+        object_elem = ET.Element('object', {
+            'placeholders': '1',
+            'c4Name': c4_name,
+            'c4Type': c4_type,
+            'c4Technology': c4_technology,
+            'c4Description': c4_description,
+            'label': component_style.label_template,
+            'id': str(component_info['id'])
+        })
+        
+        # Создаем mxCell элемент с стилем из палитры
+        mx_cell = ET.SubElement(object_elem, 'mxCell', {
+            'style': component_style.style,
+            'vertex': '1',
+            'parent': str(component_info.get('parent', '1'))
+        })
+        
+        # Создаем mxGeometry элемент
+        ET.SubElement(mx_cell, 'mxGeometry', {
+            'x': str(component_info['x']),
+            'y': str(component_info['y']),
+            'width': str(component_info['width']),
+            'height': str(component_info['height']),
+            'as': 'geometry'
+        })
+        
+        return object_elem
     
     def _create_group_cell(self, group_info: Dict) -> ET.Element:
         """Создает XML элемент для группы"""
@@ -521,9 +641,13 @@ class DrawioExporter:
         """
         Рекурсивно добавляет layout в XML структуру
         """
-        # Добавляем текущий элемент
-        group_cell = self._create_group_cell(layout)
-        xml_root.append(group_cell)
+        # Добавляем текущий элемент в зависимости от типа
+        if layout.get('element_type') == 'component':
+            element_cell = self._create_component_cell(layout)
+        else:
+            element_cell = self._create_group_cell(layout)
+            
+        xml_root.append(element_cell)
         
         # Рекурсивно добавляем всех детей
         for child_layout in layout.get('children', []):
