@@ -1,6 +1,6 @@
 from ninja import Router
 from django.shortcuts import get_object_or_404
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from typing import List, Optional
 
 from .models import (
@@ -26,6 +26,7 @@ from .schemas import (
     C2LinksInfoObjectsSchema, C2LinksInfoObjectsCreateSchema, C2LinksInfoObjectsUpdateSchema,
     ErrorSchema
 )
+from .drawio_export import DrawioExporter
 
 router = Router()
 
@@ -559,4 +560,37 @@ def delete_c2_links_info_objects(request, c2_links_info_objects_id: int):
     """Удалить связь C2 - Информационный объект"""
     c2_links_info_objects = get_object_or_404(C2LinksInfoObjects, id=c2_links_info_objects_id)
     c2_links_info_objects.delete()
-    return {"success": True} 
+    return {"success": True}
+
+
+# Экспорт в drawio
+@router.get("/dd-groups/export/drawio")
+def export_dd_groups_to_drawio(request, root_group_id: int = None):
+    """Экспортировать дерево DD групп в формат drawio XML"""
+    try:
+        exporter = DrawioExporter()
+        xml_content = exporter.export_dd_groups_to_drawio(root_group_id)
+        
+        response = HttpResponse(xml_content, content_type='application/xml')
+        response['Content-Disposition'] = 'attachment; filename="dd_groups.drawio"'
+        return response
+    except DdGroup.DoesNotExist:
+        raise Http404("Группа DD не найдена")
+    except Exception as e:
+        return {"error": f"Ошибка при экспорте: {str(e)}"}
+
+
+@router.get("/dd-groups/{dd_group_id}/export/drawio")
+def export_dd_group_tree_to_drawio(request, dd_group_id: int):
+    """Экспортировать дерево DD групп начиная с указанной группы в формат drawio XML"""
+    try:
+        exporter = DrawioExporter()
+        xml_content = exporter.export_dd_groups_to_drawio(dd_group_id)
+        
+        response = HttpResponse(xml_content, content_type='application/xml')
+        response['Content-Disposition'] = f'attachment; filename="dd_group_{dd_group_id}.drawio"'
+        return response
+    except DdGroup.DoesNotExist:
+        raise Http404("Группа DD не найдена")
+    except Exception as e:
+        return {"error": f"Ошибка при экспорте: {str(e)}"} 
