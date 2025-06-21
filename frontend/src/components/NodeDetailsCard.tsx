@@ -74,10 +74,17 @@ const GroupSelector: React.FC<{
   const [searchTerm, setSearchTerm] = useState('');
 
   // Фильтруем группы по поисковому запросу
-  const filteredGroups = groups.filter(group => 
-    group.id !== excludeGroupId && 
-    group.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredGroups = groups.filter(group => {
+    if (group.id === excludeGroupId) return false;
+    
+    const groupName = group.name.toLowerCase().trim();
+    const search = searchTerm.toLowerCase().trim();
+    
+    if (!search) return true; // Показываем все группы если поиск пустой
+    
+    // Простой поиск по вхождению подстроки
+    return groupName.includes(search);
+  });
 
   // Функция для построения полного пути к группе
   const getGroupPath = (group: DDGroupAPI): string[] => {
@@ -303,6 +310,11 @@ const NodeDetailsCard: React.FC<NodeDetailsCardProps> = ({
         setDdGroupTypes(ddGroupTypesData);
         setProtocols(protocolsData);
         setAllGroups(groupsData);
+        
+        // Проверяем, загрузилась ли группа oms-prod-4
+        const omsGroup = groupsData.find((g: DDGroupAPI) => g.name === 'oms-prod-4');
+        console.log('Группа oms-prod-4 загружена:', omsGroup);
+        console.log('Всего групп загружено:', groupsData.length);
       } catch (error) {
         console.error('Ошибка загрузки справочников:', error);
       } finally {
