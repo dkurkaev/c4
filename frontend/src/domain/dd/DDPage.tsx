@@ -2,69 +2,19 @@
 
 import { useState, useEffect } from 'react';
 import NodeDetailsCard from '../../components/NodeDetailsCard';
-
-interface DDGroupAPI {
-  id: number;
-  parent_id: number | null;
-  name: string;
-  type_id: number;
-  type_name: string;
-  instances: number | null;
-  specification: string;
-}
-
-interface DDComponentAPI {
-  id: number;
-  name: string;
-  c2_component_id: number | null;
-  type_id: number;
-  type_name: string;
-  technology: string;
-  description: string;
-  group_id: number;
-  is_external: boolean;
-}
-
-interface ComponentType {
-  id: number;
-  name: string;
-}
-
-interface DdGroupType {
-  id: number;
-  name: string;
-}
-
-interface DDLink {
-  id: number;
-  group_from_id: number;
-  group_to_id: number;
-  protocol_id: number;
-  protocol_name: string;
-  ports: number[];
-}
-
-interface DDTreeNode {
-  id: string;
-  name: string;
-  type: 'group' | 'component';
-  children?: DDTreeNode[];
-  data?: DDGroupAPI | DDComponentAPI;
-}
-
-interface TreeNodeProps {
-  node: DDTreeNode;
-  level: number;
-  onNodeSelect: (node: DDTreeNode) => void;
-  onContextMenu: (e: React.MouseEvent, node: DDTreeNode) => void;
-  onDragStart: (e: React.DragEvent, node: DDTreeNode) => void;
-  onDragOver: (e: React.DragEvent, node: DDTreeNode) => void;
-  onDragLeave: (e: React.DragEvent) => void;
-  onDrop: (e: React.DragEvent, node: DDTreeNode) => void;
-  onDragEnd: () => void;
-  isDragOver: boolean;
-  isDragging: boolean;
-}
+import { DDTree, CreateModal, MoveConfirmModal } from './components';
+import { 
+  DDGroupAPI, 
+  DDComponentAPI, 
+  ComponentType, 
+  DdGroupType, 
+  DDLink, 
+  DDTreeNode,
+  DragState,
+  ContextMenuState,
+  CreateModalState,
+  MoveConfirmModalState
+} from './types';
 
 // Функция для построения дерева из плоского списка групп и компонентов
 function buildTree(groups: DDGroupAPI[], components: DDComponentAPI[]): DDTreeNode[] {
@@ -118,124 +68,6 @@ function buildTree(groups: DDGroupAPI[], components: DDComponentAPI[]): DDTreeNo
   });
 
   return roots;
-}
-
-function TreeNode({ node, level, onNodeSelect, onContextMenu, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd, isDragOver, isDragging }: TreeNodeProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const hasChildren = node.children && node.children.length > 0;
-
-  return (
-    <div className="select-none">
-      <div 
-        className={`flex items-center py-2 px-3 cursor-pointer rounded-md transition-colors ${
-          isDragging 
-            ? 'opacity-50 bg-blue-100 border-2 border-dashed border-blue-300' 
-            : isDragOver 
-              ? 'bg-green-100 border-2 border-dashed border-green-400' 
-              : 'hover:bg-gray-50'
-        }`}
-        style={{ paddingLeft: `${level * 20 + 12}px` }}
-        draggable
-        onDragStart={(e) => onDragStart(e, node)}
-        onDragOver={(e) => onDragOver(e, node)}
-        onDragLeave={onDragLeave}
-        onDrop={(e) => onDrop(e, node)}
-        onDragEnd={onDragEnd}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (hasChildren) {
-            setIsExpanded(!isExpanded);
-          }
-          onNodeSelect(node);
-        }}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onContextMenu(e, node);
-        }}
-      >
-        {hasChildren && (
-          <svg 
-            className={`w-4 h-4 mr-2 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}
-            fill="none" 
-            stroke="currentColor" 
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-        )}
-        {!hasChildren && <div className="w-4 h-4 mr-2" />}
-        
-        {/* Иконка в зависимости от типа */}
-        {node.type === 'group' ? (
-          // Иконка группы - пунктирный квадрат
-          <svg 
-            className="w-4 h-4 mr-2 text-black" 
-            fill="none" 
-            stroke="currentColor" 
-            viewBox="0 0 24 24"
-          >
-            <rect 
-              x="3" 
-              y="3" 
-              width="18" 
-              height="18" 
-              strokeWidth={2} 
-              strokeDasharray="4 2"
-              rx="2"
-            />
-          </svg>
-        ) : (
-          // Иконка компонента - скругленный квадрат
-          <svg 
-            className="w-4 h-4 mr-2" 
-            fill="#23A2D9" 
-            stroke="#23A2D9" 
-            viewBox="0 0 24 24"
-          >
-            <rect 
-              x="3" 
-              y="3" 
-              width="18" 
-              height="18" 
-              strokeWidth={2} 
-              rx="4"
-            />
-          </svg>
-        )}
-        
-        <span className="text-gray-700">{node.name}</span>
-        
-        {/* Индикатор перетаскивания */}
-        {isDragging && (
-          <svg className="w-4 h-4 ml-auto text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-          </svg>
-        )}
-      </div>
-      
-      {hasChildren && isExpanded && (
-        <div className="ml-2">
-          {node.children!.map((child) => (
-            <TreeNode 
-              key={child.id} 
-              node={child} 
-              level={level + 1} 
-              onNodeSelect={onNodeSelect} 
-              onContextMenu={onContextMenu} 
-              onDragStart={onDragStart} 
-              onDragOver={onDragOver} 
-              onDragLeave={onDragLeave} 
-              onDrop={onDrop} 
-              onDragEnd={onDragEnd} 
-              isDragOver={false} 
-              isDragging={false} 
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }
 
 export default function DDPage() {
@@ -882,44 +714,23 @@ export default function DDPage() {
       <div className="flex gap-6">
         {/* Левая часть - дерево компонентов */}
         <div className="w-1/2">
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-            <div className="p-4 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-800">Компоненты развертывания</h2>
-              <p className="text-sm text-gray-600 mt-1">
-                Иерархическое дерево групп и компонентов системы
-              </p>
-            </div>
-            
-            <div className="p-4">
-              {ddTree.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  <svg className="w-12 h-12 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
-                  </svg>
-                  <p>Нет доступных компонентов</p>
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  {ddTree.map((node) => (
-                    <TreeNode 
-                      key={node.id} 
-                      node={node} 
-                      level={0} 
-                      onNodeSelect={handleNodeSelect} 
-                      onContextMenu={handleContextMenu} 
-                      onDragStart={handleDragStart} 
-                      onDragOver={handleDragOver} 
-                      onDragLeave={handleDragLeave} 
-                      onDrop={handleDrop} 
-                      onDragEnd={handleDragEnd} 
-                      isDragOver={dragState.dragOverNode?.id === node.id} 
-                      isDragging={dragState.draggedNode?.id === node.id} 
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+          <DDTree
+            ddTree={ddTree}
+            dragState={dragState}
+            contextMenu={contextMenu}
+            saving={saving}
+            onNodeSelect={handleNodeSelect}
+            onContextMenu={handleContextMenu}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onDragEnd={handleDragEnd}
+            onCreateNew={handleCreateNew}
+            onExport={handleExport}
+            onDelete={handleDelete}
+            canDeleteNode={canDeleteNode}
+          />
         </div>
         
         {/* Правая часть - карточка компонента */}
@@ -942,198 +753,21 @@ export default function DDPage() {
         </div>
       </div>
       
-      {/* Контекстное меню */}
-      {contextMenu.visible && (
-        <div 
-          className="fixed bg-white border border-gray-200 rounded-md shadow-lg py-1 z-50"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-        >
-          {contextMenu.node?.type === 'group' && (
-            <button
-              onClick={handleCreateNew}
-              className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center"
-            >
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-              </svg>
-              Создать новый элемент
-            </button>
-          )}
-          
-          <button
-            onClick={handleExport}
-            disabled={saving}
-            className={`w-full text-left px-4 py-2 flex items-center ${
-              !saving
-                ? 'hover:bg-gray-100 text-gray-700' 
-                : 'text-gray-400 cursor-not-allowed'
-            }`}
-            title="Экспортировать в draw.io"
-          >
-            {saving ? (
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-500 mr-2"></div>
-            ) : (
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-            )}
-            Экспорт
-          </button>
-          
-          <button
-            onClick={handleDelete}
-            disabled={!canDeleteNode(contextMenu.node!)}
-            className={`w-full text-left px-4 py-2 flex items-center ${
-              canDeleteNode(contextMenu.node!) 
-                ? 'hover:bg-red-50 text-red-600' 
-                : 'text-gray-400 cursor-not-allowed'
-            }`}
-            title={
-              !canDeleteNode(contextMenu.node!) 
-                ? 'Невозможно удалить элемент с дочерними элементами' 
-                : 'Удалить элемент'
-            }
-          >
-            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-            Удалить
-          </button>
-        </div>
-      )}
+      <CreateModal
+        createModal={createModal}
+        saving={saving}
+        onTypeSelect={handleCreateTypeSelect}
+        onValueChange={(values) => setCreateModal(prev => ({ ...prev, editValues: values }))}
+        onCancel={handleCreateCancel}
+        onSave={handleCreateSave}
+      />
       
-      {/* Модальное окно создания */}
-      {createModal.visible && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-xl font-semibold text-gray-800">Создание нового элемента</h2>
-              <p className="text-sm text-gray-600 mt-1">
-                {createModal.parentNode 
-                  ? `Родительский элемент: ${createModal.parentNode.name}`
-                  : 'Создание корневого элемента'
-                }
-              </p>
-            </div>
-            
-            <div className="p-6">
-              {!createModal.createType ? (
-                <div className="space-y-4">
-                  <h3 className="text-lg font-medium text-gray-800">Выберите тип элемента:</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <button
-                      onClick={() => handleCreateTypeSelect('group')}
-                      className="p-4 border-2 border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors"
-                    >
-                      <svg className="w-8 h-8 mx-auto mb-2 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <rect x="3" y="3" width="18" height="18" strokeWidth={2} strokeDasharray="4 2" rx="2" />
-                      </svg>
-                      <div className="text-center">
-                        <div className="font-medium">Группа</div>
-                        <div className="text-sm text-gray-600">Создать новую группу развертывания</div>
-                      </div>
-                    </button>
-                    
-                    <button
-                      onClick={() => handleCreateTypeSelect('component')}
-                      className="p-4 border-2 border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors"
-                    >
-                      <svg className="w-8 h-8 mx-auto mb-2" fill="#23A2D9" stroke="#23A2D9" viewBox="0 0 24 24">
-                        <rect x="3" y="3" width="18" height="18" strokeWidth={2} rx="4" />
-                      </svg>
-                      <div className="text-center">
-                        <div className="font-medium">Компонент</div>
-                        <div className="text-sm text-gray-600">Создать новый компонент развертывания</div>
-                      </div>
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  <NodeDetailsCard 
-                    node={{
-                      id: `new-${createModal.createType}`,
-                      name: 'Новый элемент',
-                      type: createModal.createType
-                    }}
-                    nodeData={undefined} 
-                    isEditingMode={true} 
-                    editValues={createModal.editValues} 
-                    onValueChange={(values) => setCreateModal(prev => ({ ...prev, editValues: values }))}
-                    hideHeaderAndButtons={true}
-                  />
-                </div>
-              )}
-            </div>
-            
-            <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
-              <button
-                onClick={handleCreateCancel}
-                disabled={saving}
-                className="px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors disabled:opacity-50"
-              >
-                Отмена
-              </button>
-              
-              {createModal.createType && (
-                <button
-                  onClick={handleCreateSave}
-                  disabled={saving || !createModal.editValues.name}
-                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors disabled:opacity-50"
-                >
-                  {saving ? (
-                    <div className="flex items-center">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                      Создание...
-                    </div>
-                  ) : (
-                    'Создать'
-                  )}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-      
-      {/* Модальное окно подтверждения перемещения */}
-      {moveConfirmModal.visible && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-xl font-semibold text-gray-800">Подтверждение перемещения</h2>
-              <p className="text-sm text-gray-600 mt-1">
-                Вы уверены, что хотите переместить "{moveConfirmModal.sourceNode?.name}" в "{moveConfirmModal.targetNode?.name}"?
-              </p>
-            </div>
-            
-            <div className="p-6 flex justify-end gap-3">
-              <button
-                onClick={handleMoveCancel}
-                disabled={saving}
-                className="px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors disabled:opacity-50"
-              >
-                Отмена
-              </button>
-              
-              <button
-                onClick={handleMoveConfirm}
-                disabled={saving}
-                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors disabled:opacity-50"
-              >
-                {saving ? (
-                  <div className="flex items-center">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    Перемещение...
-                  </div>
-                ) : (
-                  'Переместить'
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <MoveConfirmModal
+        moveConfirmModal={moveConfirmModal}
+        saving={saving}
+        onConfirm={handleMoveConfirm}
+        onCancel={handleMoveCancel}
+      />
     </div>
   );
 } 
