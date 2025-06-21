@@ -77,18 +77,15 @@ class DdLinkProtocolAdmin(admin.ModelAdmin):
 
 @admin.register(DdLinkPort)
 class DdLinkPortAdmin(admin.ModelAdmin):
-    list_display = ['id', 'dd_link', 'port']
-    list_filter = ['dd_link__protocol']
-    search_fields = ['dd_link__group_from__name', 'dd_link__group_to__name']
-    raw_id_fields = ['dd_link']
+    list_display = ('dd_link', 'port')
+    search_fields = ('dd_link__group_from__name', 'dd_link__group_to__name', 'port')
 
 
 @admin.register(DdLink)
 class DdLinkAdmin(admin.ModelAdmin):
-    list_display = ['id', 'group_from', 'group_to', 'protocol']
-    list_filter = ['protocol']
-    search_fields = ['group_from__name', 'group_to__name', 'protocol__name']
-    raw_id_fields = ['group_from', 'group_to', 'protocol']
+    list_display = ('group_from', 'group_to', 'protocol')
+    list_filter = ('protocol',)
+    search_fields = ('group_from__name', 'group_to__name')
 
 
 @admin.register(C2Link)

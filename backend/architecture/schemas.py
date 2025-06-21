@@ -216,6 +216,26 @@ class DdLinkUpdateSchema(Schema):
     protocol_id: Optional[int] = None
 
 
+class DdLinkDetailSchema(Schema):
+    id: int
+    group_from_id: int
+    group_to_id: int
+    protocol_id: int
+    protocol_name: str
+    ports: List[int]
+
+    class Config:
+        from_attributes = True
+
+    @staticmethod
+    def resolve_protocol_name(obj):
+        return obj.protocol.name if obj.protocol else ""
+
+    @staticmethod
+    def resolve_ports(obj):
+        return [port.port for port in obj.ports.all()]
+
+
 class C2LinkSchema(Schema):
     id: int
     component_from_id: int

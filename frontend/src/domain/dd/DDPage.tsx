@@ -35,6 +35,15 @@ interface DdGroupType {
   name: string;
 }
 
+interface DDLink {
+  id: number;
+  group_from_id: number;
+  group_to_id: number;
+  protocol_id: number;
+  protocol_name: string;
+  ports: number[];
+}
+
 interface DDTreeNode {
   id: string;
   name: string;
@@ -237,8 +246,6 @@ export default function DDPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [editValues, setEditValues] = useState<any>({});
   const [saving, setSaving] = useState(false);
-  const [componentTypes, setComponentTypes] = useState<ComponentType[]>([]);
-  const [ddGroupTypes, setDdGroupTypes] = useState<DdGroupType[]>([]);
   
   // Состояние для контекстного меню
   const [contextMenu, setContextMenu] = useState<{
@@ -467,10 +474,36 @@ export default function DDPage() {
     setContextMenu({ visible: false, x: 0, y: 0, node: null });
   };
 
-  const handleEditStart = () => {
+  const handleEditStart = async () => {
     if (selectedNode && selectedNode.data) {
       setIsEditing(true);
-      setEditValues({ ...selectedNode.data });
+      const initialValues: any = { ...selectedNode.data };
+      
+      // Если это группа, загружаем связи
+      if (selectedNode.type === 'group') {
+        try {
+          const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+          const groupId = (selectedNode.data as DDGroupAPI).id;
+          const response = await fetch(`${apiUrl}/api/architecture/dd-groups/${groupId}/links`);
+          if (response.ok) {
+            const linksData = await response.json();
+            initialValues.links = linksData.map((link: any) => ({
+              id: link.id,
+              group_from_id: link.group_from_id,
+              group_to_id: link.group_to_id,
+              protocol_id: link.protocol_id,
+              ports: [...link.ports]
+            }));
+          } else {
+            initialValues.links = [];
+          }
+        } catch (error) {
+          console.error('Ошибка загрузки связей:', error);
+          initialValues.links = [];
+        }
+      }
+      
+      setEditValues(initialValues);
     }
   };
 
@@ -480,14 +513,14 @@ export default function DDPage() {
   };
 
   const handleEditSave = async () => {
-    if (!selectedNode || !selectedNode.data) return;
+    if (!selectedNode || !editValues) return;
 
     try {
       setSaving(true);
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
       
       let endpoint = '';
-      let method = 'PUT';
+      let updatedData = { ...editValues };
       
       if (selectedNode.type === 'group') {
         const groupId = (selectedNode.data as DDGroupAPI).id;
@@ -498,37 +531,19 @@ export default function DDPage() {
       }
 
       const response = await fetch(endpoint, {
-        method,
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(editValues),
+        body: JSON.stringify(updatedData),
       });
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const updatedData = await response.json();
-
       // Создаем новый объект данных с обновленными значениями
       const newData = { ...selectedNode.data, ...updatedData };
-      
-      // Если это группа, обновляем type_name из справочника
-      if (selectedNode.type === 'group' && editValues.type_id) {
-        const groupType = ddGroupTypes.find(type => type.id === editValues.type_id);
-        if (groupType) {
-          (newData as DDGroupAPI).type_name = groupType.name;
-        }
-      }
-      
-      // Если это компонент, обновляем type_name из справочника
-      if (selectedNode.type === 'component' && editValues.type_id) {
-        const componentType = componentTypes.find(type => type.id === editValues.type_id);
-        if (componentType) {
-          (newData as DDComponentAPI).type_name = componentType.name;
-        }
-      }
 
       // Создаем новый узел с обновленными данными
       const newSelectedNode = {
@@ -566,182 +581,6 @@ export default function DDPage() {
       alert('Ошибка при сохранении изменений');
     } finally {
       setSaving(false);
-    }
-  };
-
-  const renderNodeDetails = (node: DDTreeNode | null, nodeData: any, isEditingMode: boolean, editVals: any, onValueChange: (values: any) => void) => {
-    if (!node || !nodeData) {
-      return (
-        <div className="text-center py-12 text-gray-500">
-          <svg className="w-12 h-12 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-          <p>Компонент не выбран</p>
-        </div>
-      );
-    }
-
-    if (node.type === 'group') {
-      const group = nodeData as DDGroupAPI;
-      return (
-        <div className="space-y-4">
-          <div className="grid gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Название</label>
-              {isEditingMode ? (
-                <input
-                  type="text"
-                  value={editVals.name || ''}
-                  onChange={(e) => onValueChange({ ...editVals, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              ) : (
-                <p className="text-gray-900 bg-gray-50 rounded-md px-3 py-2">{group.name}</p>
-              )}
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Экземпляры</label>
-              {isEditingMode ? (
-                <input
-                  type="number"
-                  value={editVals.instances || ''}
-                  onChange={(e) => onValueChange({ ...editVals, instances: e.target.value ? parseInt(e.target.value) : null })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              ) : (
-                <p className="text-gray-900 bg-gray-50 rounded-md px-3 py-2">
-                  {group.instances !== null ? group.instances : 'Не указано'}
-                </p>
-              )}
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Спецификация</label>
-              {isEditingMode ? (
-                <textarea
-                  value={editVals.specification || ''}
-                  onChange={(e) => onValueChange({ ...editVals, specification: e.target.value })}
-                  rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              ) : (
-                <p className="text-gray-900 bg-gray-50 rounded-md px-3 py-2">
-                  {group.specification || 'Не указана'}
-                </p>
-              )}
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Тип</label>
-              {isEditingMode ? (
-                <select
-                  value={editVals.type_id || ''}
-                  onChange={(e) => onValueChange({ ...editVals, type_id: parseInt(e.target.value) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Выберите тип</option>
-                  {ddGroupTypes.map(type => (
-                    <option key={type.id} value={type.id}>{type.name}</option>
-                  ))}
-                </select>
-              ) : (
-                <p className="text-gray-900 bg-gray-50 rounded-md px-3 py-2">{group.type_name}</p>
-              )}
-            </div>
-          </div>
-        </div>
-      );
-    } else {
-      const component = nodeData as DDComponentAPI;
-      return (
-        <div className="space-y-4">
-          <div className="grid gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Название</label>
-              {isEditingMode ? (
-                <input
-                  type="text"
-                  value={editVals.name || ''}
-                  onChange={(e) => onValueChange({ ...editVals, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              ) : (
-                <p className="text-gray-900 bg-gray-50 rounded-md px-3 py-2">{component.name}</p>
-              )}
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Технология</label>
-              {isEditingMode ? (
-                <input
-                  type="text"
-                  value={editVals.technology || ''}
-                  onChange={(e) => onValueChange({ ...editVals, technology: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              ) : (
-                <p className="text-gray-900 bg-gray-50 rounded-md px-3 py-2">
-                  {component.technology || 'Не указана'}
-                </p>
-              )}
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Описание</label>
-              {isEditingMode ? (
-                <textarea
-                  value={editVals.description || ''}
-                  onChange={(e) => onValueChange({ ...editVals, description: e.target.value })}
-                  rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              ) : (
-                <p className="text-gray-900 bg-gray-50 rounded-md px-3 py-2">
-                  {component.description || 'Не указано'}
-                </p>
-              )}
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Внешний компонент</label>
-              {isEditingMode ? (
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={editVals.is_external || false}
-                    onChange={(e) => onValueChange({ ...editVals, is_external: e.target.checked })}
-                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                  />
-                  <span className="ml-2 text-gray-700">Внешний компонент</span>
-                </div>
-              ) : (
-                <p className="text-gray-900 bg-gray-50 rounded-md px-3 py-2">
-                  {component.is_external ? 'Да' : 'Нет'}
-                </p>
-              )}
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Тип</label>
-              {isEditingMode ? (
-                <select
-                  value={editVals.type_id || ''}
-                  onChange={(e) => onValueChange({ ...editVals, type_id: parseInt(e.target.value) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Выберите тип</option>
-                  {componentTypes.map(type => (
-                    <option key={type.id} value={type.id}>{type.name}</option>
-                  ))}
-                </select>
-              ) : (
-                <p className="text-gray-900 bg-gray-50 rounded-md px-3 py-2">{component.type_name}</p>
-              )}
-            </div>
-          </div>
-        </div>
-      );
     }
   };
 
@@ -972,29 +811,23 @@ export default function DDPage() {
         setLoading(true);
         const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
         
-        // Параллельно загружаем группы, компоненты и справочники
-        const [groupsResponse, componentsResponse, componentTypesResponse, ddGroupTypesResponse] = await Promise.all([
+        // Загружаем только группы и компоненты
+        const [groupsResponse, componentsResponse] = await Promise.all([
           fetch(`${apiUrl}/api/architecture/dd-groups`),
-          fetch(`${apiUrl}/api/architecture/dd-components`),
-          fetch(`${apiUrl}/api/architecture/component-types`),
-          fetch(`${apiUrl}/api/architecture/dd-group-types`)
+          fetch(`${apiUrl}/api/architecture/dd-components`)
         ]);
         
-        if (!groupsResponse.ok || !componentsResponse.ok || !componentTypesResponse.ok || !ddGroupTypesResponse.ok) {
-          throw new Error(`HTTP error! Groups: ${groupsResponse.status}, Components: ${componentsResponse.status}, ComponentTypes: ${componentTypesResponse.status}, DdGroupTypes: ${ddGroupTypesResponse.status}`);
+        if (!groupsResponse.ok || !componentsResponse.ok) {
+          throw new Error(`HTTP error! Groups: ${groupsResponse.status}, Components: ${componentsResponse.status}`);
         }
         
-        const [groupsData, componentsData, componentTypesData, ddGroupTypesData]: [DDGroupAPI[], DDComponentAPI[], ComponentType[], DdGroupType[]] = await Promise.all([
+        const [groupsData, componentsData]: [DDGroupAPI[], DDComponentAPI[]] = await Promise.all([
           groupsResponse.json(),
-          componentsResponse.json(),
-          componentTypesResponse.json(),
-          ddGroupTypesResponse.json()
+          componentsResponse.json()
         ]);
         
         const treeData = buildTree(groupsData, componentsData);
         setDdTree(treeData);
-        setComponentTypes(componentTypesData);
-        setDdGroupTypes(ddGroupTypesData);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Ошибка загрузки данных');
         console.error('Ошибка загрузки DD данных:', err);
@@ -1092,56 +925,6 @@ export default function DDPage() {
         {/* Правая часть - карточка компонента */}
         <div className="w-1/2">
           <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-            <div className="p-4 border-b border-gray-200 flex justify-between items-center">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-800">Детали компонента</h2>
-                <p className="text-sm text-gray-600 mt-1">
-                  {selectedNode ? 'Информация о выбранном элементе' : 'Выберите компонент для просмотра деталей'}
-                </p>
-              </div>
-              
-              {selectedNode && !isEditing && (
-                <button
-                  onClick={handleEditStart}
-                  className="flex items-center px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                >
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                  </svg>
-                  Изменить
-                </button>
-              )}
-              
-              {selectedNode && isEditing && (
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleEditCancel}
-                    disabled={saving}
-                    className="flex items-center px-3 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors disabled:opacity-50"
-                  >
-                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                    Отмена
-                  </button>
-                  <button
-                    onClick={handleEditSave}
-                    disabled={saving}
-                    className="flex items-center px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors disabled:opacity-50"
-                  >
-                    {saving ? (
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    ) : (
-                      <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    )}
-                    ОК
-                  </button>
-                </div>
-              )}
-            </div>
-            
             <div className="p-4">
               <NodeDetailsCard 
                 node={selectedNode} 
@@ -1149,8 +932,10 @@ export default function DDPage() {
                 isEditingMode={isEditing} 
                 editValues={editValues} 
                 onValueChange={setEditValues}
-                componentTypes={componentTypes}
-                ddGroupTypes={ddGroupTypes}
+                onEditStart={handleEditStart}
+                onEditSave={handleEditSave}
+                onEditCancel={handleEditCancel}
+                saving={saving}
               />
             </div>
           </div>
@@ -1163,15 +948,17 @@ export default function DDPage() {
           className="fixed bg-white border border-gray-200 rounded-md shadow-lg py-1 z-50"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
-          <button
-            onClick={handleCreateNew}
-            className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center"
-          >
-            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-            </svg>
-            Создать новый элемент
-          </button>
+          {contextMenu.node?.type === 'group' && (
+            <button
+              onClick={handleCreateNew}
+              className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center"
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
+              Создать новый элемент
+            </button>
+          )}
           
           <button
             onClick={handleExport}
@@ -1263,24 +1050,18 @@ export default function DDPage() {
                 </div>
               ) : (
                 <div>
-                  <div className="mb-6">
-                    <h3 className="text-lg font-medium text-gray-800 mb-2">
-                      Создание {createModal.createType === 'group' ? 'группы' : 'компонента'}
-                    </h3>
-                  </div>
-                  
-                  <div className="p-4 border-t">
-                    <h3 className="text-lg font-medium mb-4">Детали компонента</h3>
-                    <NodeDetailsCard 
-                      node={createModal.parentNode} 
-                      nodeData={createModal.editValues} 
-                      isEditingMode={true} 
-                      editValues={createModal.editValues} 
-                      onValueChange={(values) => setCreateModal(prev => ({ ...prev, editValues: values }))}
-                      componentTypes={componentTypes}
-                      ddGroupTypes={ddGroupTypes}
-                    />
-                  </div>
+                  <NodeDetailsCard 
+                    node={{
+                      id: `new-${createModal.createType}`,
+                      name: 'Новый элемент',
+                      type: createModal.createType
+                    }}
+                    nodeData={undefined} 
+                    isEditingMode={true} 
+                    editValues={createModal.editValues} 
+                    onValueChange={(values) => setCreateModal(prev => ({ ...prev, editValues: values }))}
+                    hideHeaderAndButtons={true}
+                  />
                 </div>
               )}
             </div>

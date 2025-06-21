@@ -32,5 +32,4 @@ api.add_router("/architecture/", architecture_router)
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', api.urls),
-    path('api', api.urls),  # Без слеша
 ]

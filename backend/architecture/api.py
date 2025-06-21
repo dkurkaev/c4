@@ -2,6 +2,7 @@ from ninja import Router
 from django.shortcuts import get_object_or_404
 from django.http import Http404, HttpResponse
 from typing import List, Optional
+from django.db import models
 
 from .models import (
     ComponentType, OperationType, InfoObject,
@@ -21,11 +22,10 @@ from .schemas import (
     DdComponentSchema, DdComponentCreateSchema, DdComponentUpdateSchema,
     DdLinkProtocolSchema, DdLinkProtocolCreateSchema,
     DdLinkPortSchema, DdLinkPortCreateSchema, DdLinkPortUpdateSchema,
-    DdLinkSchema, DdLinkCreateSchema, DdLinkUpdateSchema,
+    DdLinkSchema, DdLinkCreateSchema, DdLinkUpdateSchema, DdLinkDetailSchema,
     C2LinkSchema, C2LinkCreateSchema, C2LinkUpdateSchema,
     C2LinksInfoObjectsSchema, C2LinksInfoObjectsCreateSchema, C2LinksInfoObjectsUpdateSchema,
-    ExportElementSchema, ExportMultipleElementsSchema, ExportAllGroupsSchema,
-    ErrorSchema
+    ErrorSchema, ExportElementSchema, ExportMultipleElementsSchema, ExportAllGroupsSchema
 )
 from .export.drawio_export import DrawioExporter
 
@@ -486,6 +486,19 @@ def delete_dd_link(request, dd_link_id: int):
     dd_link = get_object_or_404(DdLink, id=dd_link_id)
     dd_link.delete()
     return {"success": True}
+
+
+@router.get("/dd-groups/{group_id}/links", response=List[DdLinkDetailSchema])
+def get_group_links(request, group_id: int):
+    """Получить все связи для группы (входящие и исходящие)"""
+    group = get_object_or_404(DdGroup, id=group_id)
+    
+    # Получаем все связи где группа является источником или назначением
+    links = DdLink.objects.filter(
+        models.Q(group_from=group) | models.Q(group_to=group)
+    ).select_related('protocol').prefetch_related('ports')
+    
+    return links
 
 
 # C2 Links
