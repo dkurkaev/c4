@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import NodeDetailsCard from '../../components/NodeDetailsCard';
-import { DDTree, CreateModal, MoveConfirmModal } from './components';
+import { DDTree, CreateModal, MoveConfirmModal, DeleteConfirmModal } from './components';
 import { 
   DDGroupAPI, 
   DDComponentAPI, 
@@ -13,7 +13,8 @@ import {
   DragState,
   ContextMenuState,
   CreateModalState,
-  MoveConfirmModalState
+  MoveConfirmModalState,
+  DeleteConfirmModalState
 } from './types';
 
 // Функция для построения дерева из плоского списка групп и компонентов
@@ -109,6 +110,12 @@ export default function DDPage() {
     sourceNode: DDTreeNode | null;
     targetNode: DDTreeNode | null;
   }>({ visible: false, sourceNode: null, targetNode: null });
+
+  // Состояние для модального окна подтверждения удаления
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
+    visible: boolean;
+    node: DDTreeNode | null;
+  }>({ visible: false, node: null });
 
   const handleNodeSelect = (node: DDTreeNode) => {
     setSelectedNode(node);
@@ -238,67 +245,12 @@ export default function DDPage() {
       return;
     }
 
-    // Подтверждение удаления
-    const confirmDelete = window.confirm(`Вы уверены, что хотите удалить "${node.name}"?`);
-    if (!confirmDelete) {
-      setContextMenu({ visible: false, x: 0, y: 0, node: null });
-      return;
-    }
-
-    try {
-      setSaving(true);
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      
-      let endpoint = '';
-      
-      if (node.type === 'group') {
-        const groupId = (node.data as DDGroupAPI).id;
-        endpoint = `${apiUrl}/api/architecture/dd-groups/${groupId}`;
-      } else {
-        const componentId = (node.data as DDComponentAPI).id;
-        endpoint = `${apiUrl}/api/architecture/dd-components/${componentId}`;
-      }
-
-      const response = await fetch(endpoint, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      // Перезагружаем данные после удаления
-      const fetchDDData = async () => {
-        const [groupsResponse, componentsResponse] = await Promise.all([
-          fetch(`${apiUrl}/api/architecture/dd-groups`),
-          fetch(`${apiUrl}/api/architecture/dd-components`)
-        ]);
-        
-        const [groupsData, componentsData]: [DDGroupAPI[], DDComponentAPI[]] = await Promise.all([
-          groupsResponse.json(),
-          componentsResponse.json()
-        ]);
-        
-        const treeData = buildTree(groupsData, componentsData);
-        setDdTree(treeData);
-      };
-
-      await fetchDDData();
-      
-      // Если удаленный элемент был выбран, сбрасываем выбор
-      if (selectedNode && selectedNode.id === node.id) {
-        setSelectedNode(null);
-        setIsEditing(false);
-        setEditValues({});
-      }
-      
-      setContextMenu({ visible: false, x: 0, y: 0, node: null });
-    } catch (err) {
-      console.error('Ошибка удаления:', err);
-      alert('Ошибка при удалении элемента');
-    } finally {
-      setSaving(false);
-    }
+    // Показываем модальное окно подтверждения
+    setDeleteConfirmModal({
+      visible: true,
+      node: node
+    });
+    setContextMenu({ visible: false, x: 0, y: 0, node: null });
   };
 
   // Закрытие контекстного меню при клике вне его
@@ -637,6 +589,72 @@ export default function DDPage() {
     }
   };
 
+  // Обработчик подтверждения удаления
+  const handleDeleteConfirm = async () => {
+    if (!deleteConfirmModal.node) return;
+
+    const node = deleteConfirmModal.node;
+
+    try {
+      setSaving(true);
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      
+      let endpoint = '';
+      
+      if (node.type === 'group') {
+        const groupId = (node.data as DDGroupAPI).id;
+        endpoint = `${apiUrl}/api/architecture/dd-groups/${groupId}`;
+      } else {
+        const componentId = (node.data as DDComponentAPI).id;
+        endpoint = `${apiUrl}/api/architecture/dd-components/${componentId}`;
+      }
+
+      const response = await fetch(endpoint, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // Перезагружаем данные после удаления
+      const fetchDDData = async () => {
+        const [groupsResponse, componentsResponse] = await Promise.all([
+          fetch(`${apiUrl}/api/architecture/dd-groups`),
+          fetch(`${apiUrl}/api/architecture/dd-components`)
+        ]);
+        
+        const [groupsData, componentsData]: [DDGroupAPI[], DDComponentAPI[]] = await Promise.all([
+          groupsResponse.json(),
+          componentsResponse.json()
+        ]);
+        
+        const treeData = buildTree(groupsData, componentsData);
+        setDdTree(treeData);
+      };
+
+      await fetchDDData();
+      
+      // Если удаленный элемент был выбран, сбрасываем выбор
+      if (selectedNode && selectedNode.id === node.id) {
+        setSelectedNode(null);
+        setIsEditing(false);
+        setEditValues({});
+      }
+      
+      setDeleteConfirmModal({ visible: false, node: null });
+    } catch (err) {
+      console.error('Ошибка удаления:', err);
+      alert('Ошибка при удалении элемента');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteCancel = () => {
+    setDeleteConfirmModal({ visible: false, node: null });
+  };
+
   useEffect(() => {
     const fetchDDData = async () => {
       try {
@@ -767,6 +785,13 @@ export default function DDPage() {
         saving={saving}
         onConfirm={handleMoveConfirm}
         onCancel={handleMoveCancel}
+      />
+      
+      <DeleteConfirmModal
+        deleteConfirmModal={deleteConfirmModal}
+        saving={saving}
+        onConfirm={handleDeleteConfirm}
+        onCancel={handleDeleteCancel}
       />
     </div>
   );

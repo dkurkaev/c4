@@ -72,4 +72,9 @@ export interface MoveConfirmModalState {
   visible: boolean;
   sourceNode: DDTreeNode | null;
   targetNode: DDTreeNode | null;
+}
+
+export interface DeleteConfirmModalState {
+  visible: boolean;
+  node: DDTreeNode | null;
 } 
